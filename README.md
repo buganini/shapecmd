@@ -118,4 +118,5 @@ segments.
   and `rotateDeg`.
 - `Path` and `ClosedPath`: starting point and editable command endpoints.
 - Path arcs: center, endpoint, and an `R/2` radius handle on the start side.
-- `ToShape` and `ToShapeEdge`: derived endpoints that cannot be dragged directly.
+- `ToShape` and `ToShapeEdge`: dragging the derived endpoint moves the referenced
+  target shape.
