@@ -960,8 +960,16 @@ class ShapeCmd(Application):
         )
 
     def save(self, event):
+        output_path = SaveFile(
+            default=str(self.input_path),
+            title="Save ShapeCmd JSON",
+            types="JSON Files (*.json)|All Files (*)",
+        )
+        if output_path is None:
+            return
+
         data = {"shapes": Unstate(self.state.shapes)}
-        self.input_path.write_text(
+        Path(output_path).write_text(
             json.dumps(data, indent=4, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
