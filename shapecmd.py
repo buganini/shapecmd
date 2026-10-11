@@ -153,6 +153,7 @@ class ShapeCmd(Application):
         "arc_to_shape": "ArcTo target shape position",
         "arc_to_shape_edge": "ArcTo endpoint on target shape",
         "arc_to_radius": "ArcTo radius",
+        "fillet_radius": "Fillet radius",
         "segment_midpoint": "Move both endpoints",
     }
 
@@ -172,6 +173,7 @@ class ShapeCmd(Application):
         "ArcTo",
         "ArcToShape",
         "ArcToShapeEdge",
+        "Fillet",
         "PolarTo",
         "To",
         "BezierTo",
@@ -246,6 +248,7 @@ class ShapeCmd(Application):
             ("radius", DEFAULT_RADIUS),
             ("direction", "CCW"),
         ),
+        "Fillet": (("radius", DEFAULT_RADIUS),),
         "PolarTo": (("angle", 0), ("distance", 0)),
         "To": (("x", 0), ("y", 0)),
         "BezierTo": (("x", 0), ("y", 0)),
@@ -333,6 +336,15 @@ class ShapeCmd(Application):
             return
 
         command_name = command[0]
+        if command_name == "Fillet" and len(command) >= 2:
+            try:
+                radius = abs(float(command[1]))
+            except (TypeError, ValueError):
+                radius = self.DEFAULT_RADIUS
+            with command:
+                command[1] = round(radius, 2)
+            return
+
         if command_name == "RegularPolygon" and len(command) >= 5:
             try:
                 sides = max(3, min(1000, int(command[4])))
@@ -444,7 +456,10 @@ class ShapeCmd(Application):
                                         .id(f"commands-{shape_idx}")
                                         .layout(height=table_height, weight=0)
                                     ):
+                                        endpoint_index = 0
                                         for cmd_idx, cmd in enumerate(commands):
+                                            if cmd_idx > 0 and cmd[0] != "Fillet":
+                                                endpoint_index += 1
                                             parameters = self.COMMAND_PARAMETERS.get(
                                                 cmd[0], ()
                                             )
@@ -458,8 +473,10 @@ class ShapeCmd(Application):
                                             )
                                             with TableNode():
                                                 TableNode(
-                                                    str(cmd_idx)
-                                                    if is_path and cmd_idx > 0
+                                                    str(endpoint_index)
+                                                    if is_path
+                                                    and cmd_idx > 0
+                                                    and cmd[0] != "Fillet"
                                                     else ""
                                                 )
                                                 (
@@ -1058,6 +1075,300 @@ class ShapeCmd(Application):
             offset += length
         return segments[-1][1]
 
+    def apply_path_fillets(self, commands, points, handles, closed):
+        command_list = list(commands)
+        endpoint_kinds = {
+            "path_start",
+            "to",
+            "bezier_to",
+            "bezier_to_shape",
+            "bezier_to_shape_edge",
+            "to_shape",
+            "to_shape_edge",
+            "polar_to",
+            "arc_to",
+            "arc_to_shape",
+            "arc_to_shape_edge",
+            "arc_end",
+        }
+        vertex_handles = [
+            handle for handle in handles if handle["kind"] in endpoint_kinds
+        ]
+        if len(vertex_handles) < 3 or not points:
+            return points, handles
+
+        vertex_by_command = {
+            id(handle["command"]): index
+            for index, handle in enumerate(vertex_handles)
+        }
+        raw_last_index = len(points) - 1
+        if closed and raw_last_index and points[-1] == points[0]:
+            raw_last_index -= 1
+
+        direct_segments = set()
+        segment_lengths = {}
+        for vertex_index in range(len(vertex_handles) - 1):
+            start_index = vertex_handles[vertex_index]["point_index"]
+            end_index = vertex_handles[vertex_index + 1]["point_index"]
+            if end_index - start_index != 1:
+                continue
+            key = (vertex_index, vertex_index + 1)
+            direct_segments.add(key)
+            segment_lengths[key] = math.hypot(
+                points[end_index][0] - points[start_index][0],
+                points[end_index][1] - points[start_index][1],
+            )
+
+        if closed:
+            key = (len(vertex_handles) - 1, 0)
+            last_index = vertex_handles[-1]["point_index"]
+            if last_index == raw_last_index:
+                direct_segments.add(key)
+                segment_lengths[key] = math.hypot(
+                    points[0][0] - points[last_index][0],
+                    points[0][1] - points[last_index][1],
+                )
+
+        segment_trim = {key: 0.0 for key in direct_segments}
+        fillets = {}
+        for command_index, command in enumerate(command_list):
+            if not command or command[0] != "Fillet" or len(command) < 2:
+                continue
+            if command_index == 0:
+                continue
+
+            vertex_index = vertex_by_command.get(id(command_list[command_index - 1]))
+            if vertex_index is None:
+                continue
+            previous_index = vertex_index - 1
+            next_index = vertex_index + 1
+            if previous_index < 0:
+                if not closed:
+                    continue
+                previous_index = len(vertex_handles) - 1
+            if next_index >= len(vertex_handles):
+                if not closed:
+                    continue
+                next_index = 0
+
+            incoming_key = (previous_index, vertex_index)
+            outgoing_key = (vertex_index, next_index)
+            if (
+                incoming_key not in direct_segments
+                or outgoing_key not in direct_segments
+                or vertex_index in fillets
+            ):
+                continue
+
+            previous_point = vertex_handles[previous_index]["point"]
+            corner = vertex_handles[vertex_index]["point"]
+            next_point = vertex_handles[next_index]["point"]
+            incoming_length = segment_lengths[incoming_key]
+            outgoing_length = segment_lengths[outgoing_key]
+            if incoming_length <= 1e-9 or outgoing_length <= 1e-9:
+                continue
+
+            backward = (
+                (previous_point[0] - corner[0]) / incoming_length,
+                (previous_point[1] - corner[1]) / incoming_length,
+            )
+            forward = (
+                (next_point[0] - corner[0]) / outgoing_length,
+                (next_point[1] - corner[1]) / outgoing_length,
+            )
+            dot = max(-1.0, min(1.0, backward[0] * forward[0] + backward[1] * forward[1]))
+            interior_angle = math.acos(dot)
+            turn = (-backward[0]) * forward[1] - (-backward[1]) * forward[0]
+            if abs(turn) <= 1e-9:
+                continue
+
+            half_angle = interior_angle / 2
+            tangent_factor = math.tan(half_angle)
+            sine_half_angle = math.sin(half_angle)
+            if tangent_factor <= 1e-9 or sine_half_angle <= 1e-9:
+                continue
+
+            available_incoming = max(
+                0.0,
+                incoming_length - segment_trim[incoming_key],
+            )
+            available_outgoing = max(
+                0.0,
+                outgoing_length - segment_trim[outgoing_key],
+            )
+            maximum_tangent = min(available_incoming, available_outgoing)
+            maximum_radius = maximum_tangent * tangent_factor
+            try:
+                requested_radius = abs(float(command[1]))
+            except (TypeError, ValueError):
+                requested_radius = 0.0
+            radius = min(requested_radius, maximum_radius)
+            normalized_radius = round(radius, 2)
+            try:
+                stored_radius = float(command[1])
+            except (TypeError, ValueError):
+                stored_radius = math.nan
+            if stored_radius != normalized_radius:
+                with command:
+                    command[1] = normalized_radius
+
+            tangent_distance = radius / tangent_factor
+            segment_trim[incoming_key] += tangent_distance
+            segment_trim[outgoing_key] += tangent_distance
+            tangent_in = (
+                corner[0] + backward[0] * tangent_distance,
+                corner[1] + backward[1] * tangent_distance,
+            )
+            tangent_out = (
+                corner[0] + forward[0] * tangent_distance,
+                corner[1] + forward[1] * tangent_distance,
+            )
+            bisector_x = backward[0] + forward[0]
+            bisector_y = backward[1] + forward[1]
+            bisector_length = math.hypot(bisector_x, bisector_y)
+            if bisector_length <= 1e-9:
+                continue
+            bisector = (
+                bisector_x / bisector_length,
+                bisector_y / bisector_length,
+            )
+            radius_scale = 1 / sine_half_angle - 1
+            arc_points = [tangent_in]
+            arc_midpoint = corner
+            if radius > 1e-9:
+                center_distance = radius / sine_half_angle
+                center = (
+                    corner[0] + bisector[0] * center_distance,
+                    corner[1] + bisector[1] * center_distance,
+                )
+                start_angle = math.atan2(
+                    tangent_in[1] - center[1],
+                    tangent_in[0] - center[0],
+                )
+                end_angle = math.atan2(
+                    tangent_out[1] - center[1],
+                    tangent_out[0] - center[0],
+                )
+                span = (
+                    (end_angle - start_angle) % (2 * math.pi)
+                    if turn > 0
+                    else -((start_angle - end_angle) % (2 * math.pi))
+                )
+                segment_count = min(
+                    720,
+                    max(
+                        1,
+                        math.ceil(
+                            abs(math.degrees(span))
+                            / self.ARC_SEGMENT_DEGREES
+                        ),
+                    ),
+                )
+                arc_points.extend(
+                    (
+                        center[0]
+                        + math.cos(start_angle + span * index / segment_count)
+                        * radius,
+                        center[1]
+                        + math.sin(start_angle + span * index / segment_count)
+                        * radius,
+                    )
+                    for index in range(1, segment_count + 1)
+                )
+                arc_midpoint = (
+                    center[0] + math.cos(start_angle + span / 2) * radius,
+                    center[1] + math.sin(start_angle + span / 2) * radius,
+                )
+
+            fillets[vertex_index] = {
+                "command": command,
+                "corner": corner,
+                "tangent_in": tangent_in,
+                "tangent_out": tangent_out,
+                "arc_points": arc_points,
+                "midpoint": arc_midpoint,
+                "bisector": bisector,
+                "radius_scale": radius_scale,
+                "maximum_radius": maximum_radius,
+                "endpoint_index": vertex_handles[vertex_index].get(
+                    "endpoint_index"
+                ),
+            }
+
+        if not fillets:
+            return points, handles
+
+        fillet_by_point_index = {
+            vertex_handles[vertex_index]["point_index"]: spec
+            for vertex_index, spec in fillets.items()
+        }
+        start_fillet = fillet_by_point_index.get(0) if closed else None
+        rebuilt_points = []
+        if start_fillet is not None:
+            rebuilt_points.append(start_fillet["tangent_out"])
+            point_indices = range(1, raw_last_index + 1)
+        else:
+            point_indices = range(raw_last_index + 1)
+
+        for point_index in point_indices:
+            spec = fillet_by_point_index.get(point_index)
+            if spec is None:
+                rebuilt_points.append(points[point_index])
+                continue
+            rebuilt_points.append(spec["tangent_in"])
+            rebuilt_points.extend(spec["arc_points"][1:])
+
+        if closed:
+            if start_fillet is not None:
+                rebuilt_points.append(start_fillet["tangent_in"])
+                rebuilt_points.extend(start_fillet["arc_points"][1:])
+                rebuilt_points[-1] = rebuilt_points[0]
+            elif rebuilt_points[-1] != rebuilt_points[0]:
+                rebuilt_points.append(rebuilt_points[0])
+
+        vertex_index_by_handle = {
+            id(handle): index for index, handle in enumerate(vertex_handles)
+        }
+        for handle in handles:
+            if handle["kind"] != "segment_midpoint":
+                continue
+            start_index = vertex_index_by_handle.get(id(handle["start_handle"]))
+            end_index = vertex_index_by_handle.get(id(handle["end_handle"]))
+            if start_index is None or end_index is None:
+                continue
+            key = (start_index, end_index)
+            if key not in direct_segments:
+                continue
+            start_point = (
+                fillets[start_index]["tangent_out"]
+                if start_index in fillets
+                else vertex_handles[start_index]["point"]
+            )
+            end_point = (
+                fillets[end_index]["tangent_in"]
+                if end_index in fillets
+                else vertex_handles[end_index]["point"]
+            )
+            handle["point"] = (
+                (start_point[0] + end_point[0]) / 2,
+                (start_point[1] + end_point[1]) / 2,
+            )
+
+        for spec in fillets.values():
+            handles.append(
+                {
+                    "kind": "fillet_radius",
+                    "command": spec["command"],
+                    "point": spec["midpoint"],
+                    "corner": spec["corner"],
+                    "bisector": spec["bisector"],
+                    "radius_scale": spec["radius_scale"],
+                    "maximum_radius": spec["maximum_radius"],
+                    "endpoint_index": spec["endpoint_index"],
+                }
+            )
+        return rebuilt_points, handles
+
     def path_geometry(self, commands, closed=False, resolving=None):
         resolving = set() if resolving is None else set(resolving)
         commands_identity = id(commands)
@@ -1078,12 +1389,14 @@ class ShapeCmd(Application):
                 "kind": "path_start",
                 "command": commands[0],
                 "point": start_point,
+                "point_index": 0,
             }
         ]
         previous_endpoint_handle = handles[0]
         heading = 0.0
+        endpoint_index = 0
 
-        for endpoint_index, command in enumerate(list(commands)[1:], start=1):
+        for command in list(commands)[1:]:
             if not command:
                 continue
 
@@ -1450,11 +1763,10 @@ class ShapeCmd(Application):
                             },
                         ]
                     )
+                elif command_name == "Fillet":
+                    pass
             except (TypeError, ValueError):
                 continue
-
-            for handle in handles[handle_start_index:]:
-                handle["endpoint_index"] = endpoint_index
 
             endpoint_handle = next(
                 (
@@ -1479,6 +1791,11 @@ class ShapeCmd(Application):
             )
             if endpoint_handle is None:
                 continue
+
+            endpoint_index += 1
+            for handle in handles[handle_start_index:]:
+                handle["endpoint_index"] = endpoint_index
+            endpoint_handle["point_index"] = len(points) - 1
 
             midpoint = self.polyline_midpoint(points[segment_start_index:])
             if midpoint is not None:
@@ -1513,6 +1830,12 @@ class ShapeCmd(Application):
                     ),
                 }
             )
+        points, handles = self.apply_path_fillets(
+            commands,
+            points,
+            handles,
+            closed,
+        )
         return {"points": points, "handles": handles}
 
     def path_points(self, commands, closed=False):
@@ -1630,6 +1953,15 @@ class ShapeCmd(Application):
                 canvas.drawLine(
                     midpoint_x,
                     midpoint_y,
+                    point_x,
+                    point_y,
+                    color=0xFBBF24,
+                )
+            elif handle["kind"] == "fillet_radius":
+                corner_x, corner_y = self.world_to_canvas(*handle["corner"])
+                canvas.drawLine(
+                    corner_x,
+                    corner_y,
                     point_x,
                     point_y,
                     color=0xFBBF24,
@@ -2123,6 +2455,22 @@ class ShapeCmd(Application):
                 command[2] = round(max(0, projected_half_radius * 2), 2)
         elif kind == "arc_to_radius":
             self.drag_arc_to_radius(handle, target_x, target_y)
+        elif kind == "fillet_radius":
+            scale = handle["radius_scale"]
+            if scale <= 1e-9:
+                return
+            corner_x, corner_y = handle["corner"]
+            bisector_x, bisector_y = handle["bisector"]
+            handle_distance = (
+                (target_x - corner_x) * bisector_x
+                + (target_y - corner_y) * bisector_y
+            )
+            radius = min(
+                handle["maximum_radius"],
+                max(0.0, handle_distance / scale),
+            )
+            with command:
+                command[1] = round(radius, 2)
         elif kind == "arc_end":
             center_x, center_y = handle["center"]
             end_angle = math.atan2(target_y - center_y, target_x - center_x)
@@ -2769,6 +3117,25 @@ class ShapeCmd(Application):
                 command.append(default)
 
         commands = shape["commands"]
+        if command[0] == "Fillet":
+            self.focused_command = None
+            self.focused_path_commands = commands
+            if commands[-1] is command:
+                geometry = self.path_geometry(commands, closed=False)
+                initial_x, initial_y = (
+                    geometry["points"][-1]
+                    if geometry["points"]
+                    else (0, 0)
+                )
+                self.append_placement_command(
+                    commands,
+                    ["To", round(initial_x, 2), round(initial_y, 2)],
+                )
+            else:
+                self.clear_placement()
+                self.redraw()
+            return
+
         if command is commands[0] and command[0] not in ("Path", "ClosedPath"):
             self.focused_command = command
             self.focused_path_commands = None

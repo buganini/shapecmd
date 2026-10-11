@@ -80,6 +80,7 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | `ArcTo` | `x, y, radius, direction[, largeArc]` | Draws an arc to a fixed endpoint. The optional `largeArc` value is maintained automatically while dragging (`false` for ≤180°, `true` for >180°) and is not shown as an editable table field. The radius is clamped to at least half the distance from the start to the endpoint, and the corrected value is written back to the model. |
 | `ArcToShape` | `name, radius, direction[, largeArc]` | Draws an arc to the target shape's reference x/y coordinate. `largeArc` is maintained automatically. |
 | `ArcToShapeEdge` | `name, radius, direction[, largeArc]` | Draws an arc to the nearest point on the target shape's boundary. `largeArc` is maintained automatically. |
+| `Fillet` | `radius` | Rounds the preceding endpoint between its incoming and outgoing straight segments. The radius is clamped to fit both segments and the corrected value is written back to the model. |
 | `ToShape` | `name` | Draws to the target shape's reference x/y coordinate. |
 | `ToShapeEdge` | `name` | Draws to the nearest point on the target shape's boundary. |
 
@@ -91,7 +92,9 @@ its center from the start, fixed endpoint, radius, direction, and `largeArc`;
 the minimum radius produces a semicircle.
 
 Radius parameters and `arcLength` default to `50`. Degree-based arc spans
-default to `30`.
+default to `30`. `Fillet` is an endpoint modifier rather than an endpoint of
+its own, so it has no endpoint index. It also composes with `ToShape` and
+`ToShapeEdge` when either command supplies the preceding endpoint.
 
 The reference x/y coordinate used by `*ToShape` commands depends on the target
 shape:
@@ -117,7 +120,8 @@ rendered line segments.
 - `Fit`: restore the same fitted view at any time.
 - `Display Arrow`: show or hide direction arrows on the focused path.
 - `Show`/`Hide` next to a shape name: expand or collapse its commands. Shapes
-  are collapsed by default.
+  loaded from JSON are collapsed by default, newly added shapes are expanded,
+  and a focused shape remains visible regardless of its saved expansion state.
 - Each expanded shape has its own command table. Double-click a cell to edit
   it; for paths, the leftmost read-only column shows the zero-based command
   index as its endpoint index. The path-start index `0` is hidden, so visible
@@ -125,7 +129,8 @@ rendered line segments.
   editors.
 - Changing a command type re-enters placement mode. Direct-position commands
   follow the pointer, `PolarTo` places its endpoint, and path arcs place their
-  center.
+  center. Changing the final command to `Fillet` automatically appends a `To`
+  and places that outgoing endpoint.
 - Path placement is continuous. Placing a `Path` or `ClosedPath` start point
   creates a pending `To`; placing a next command creates another command of the
   same type. Press Escape to stop placement and remove the pending command.
@@ -156,5 +161,8 @@ rendered line segments.
   center. Dragging it preserves both endpoints and direction without displaying
   the full radius. Moving the handle through the semicircle position
   automatically switches between minor and major arcs.
+- `Fillet`: a radius handle at the rounded corner's arc midpoint. The original
+  endpoint remains the logical corner and can still be dragged through its
+  preceding endpoint command.
 - All `*ToShape` and `*ToShapeEdge` commands: dragging the derived endpoint moves
   the referenced target shape.
