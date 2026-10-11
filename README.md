@@ -75,7 +75,7 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | `BezierTo` | `x, y` | Draws to the endpoint using cubic Bézier control points calculated from the previous heading. |
 | `ArcDegree` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
 | `ArcLength` | `angle, radius, arcLength, direction` | Draws an arc from the current point with its extent specified as a linear arc length. |
-| `ArcTo` | `x, y, radius, direction` | Draws the minor arc to a fixed endpoint. The radius is clamped to at least half the distance from the start to the endpoint, and the corrected value is written back to the model. |
+| `ArcTo` | `x, y, radius, direction, largeArc` | Draws an arc to a fixed endpoint. `largeArc` is automatically set while dragging (`false` for ≤180°, `true` for >180°). The radius is clamped to at least half the distance from the start to the endpoint, and the corrected value is written back to the model. |
 | `ToShape` | `name` | Draws to the target shape's reference x/y coordinate. |
 | `ToShapeEdge` | `name` | Draws to the nearest point on the target shape's boundary. |
 
@@ -83,8 +83,8 @@ For `ArcDegree` and `ArcLength`, `angle` is the angle from the inferred center t
 the arc's starting point. The center is calculated from the current path
 position, angle, and radius. `direction` is `CW` or `CCW`. For `ArcLength`, the
 angular span in radians is calculated as `arcLength / radius`. `ArcTo` derives
-its center from the start, fixed endpoint, radius, and direction; the minimum
-radius produces a semicircle.
+its center from the start, fixed endpoint, radius, direction, and `largeArc`;
+the minimum radius produces a semicircle.
 
 Radius parameters and `arcLength` default to `50`. Degree-based arc spans
 default to `30`.
@@ -148,6 +148,8 @@ segments.
   handle on the start side.
 - `ArcTo`: endpoint and a radius handle on a short, fixed-screen-length stem
   extending from the arc midpoint toward the center. Dragging it preserves
-  both endpoints and direction without displaying the full radius.
+  both endpoints and direction without displaying the full radius. Moving the
+  handle through the semicircle position automatically switches between minor
+  and major arcs.
 - `ToShape` and `ToShapeEdge`: dragging the derived endpoint moves the referenced
   target shape.

@@ -209,6 +209,7 @@ class ShapeCmd(Application):
             ("y", 0),
             ("radius", DEFAULT_RADIUS),
             ("direction", "CCW"),
+            ("large_arc", False),
         ),
         "Turn": (("angle", 0), ("distance", 0)),
         "To": (("x", 0), ("y", 0)),
@@ -282,7 +283,7 @@ class ShapeCmd(Application):
     @staticmethod
     def arc_to_minimum_radius(start, target):
         radius = math.hypot(target[0] - start[0], target[1] - start[1]) / 2
-        return math.ceil(radius * 100 - 1e-9) / 100
+        return round(radius, 2)
 
     def normalize_command(self, command, commands=None):
         if not command:
@@ -432,15 +433,25 @@ class ShapeCmd(Application):
                                                         defaults,
                                                     )
                                                     value = argument.value
-                                                    choices = (
-                                                        ("CCW", "CW")
-                                                        if arg_name == "direction"
-                                                        else None
-                                                    )
+                                                    if arg_name == "direction":
+                                                        choices = ("CCW", "CW")
+                                                        display_value = value
+                                                    elif arg_name == "large_arc":
+                                                        choices = {
+                                                            False: "Minor",
+                                                            True: "Major",
+                                                        }
+                                                        display_value = choices.get(
+                                                            value,
+                                                            value,
+                                                        )
+                                                    else:
+                                                        choices = None
+                                                        display_value = value
                                                     (
                                                         TableNode(
                                                             value,
-                                                            display=f"{self.parameter_label(arg_name)}: {value}",
+                                                            display=f"{self.parameter_label(arg_name)}: {display_value}",
                                                             choices=choices,
                                                         ).set(
                                                             self.table_argument_changed,
@@ -1172,14 +1183,28 @@ class ShapeCmd(Application):
                     )
                     if direction not in ("CW", "CCW"):
                         direction = "CCW"
+                    large_arc = (
+                        command[5]
+                        if len(command) >= 6 and isinstance(command[5], bool)
+                        else str(command[5]).lower() in ("true", "1", "major")
+                        if len(command) >= 6
+                        else False
+                    )
 
                     if chord_length:
                         half_chord = chord_length / 2
                         normal_x = -chord_y / chord_length
                         normal_y = chord_x / chord_length
                         direction_sign = 1 if direction == "CCW" else -1
-                        center_distance = direction_sign * math.sqrt(
-                            max(0, radius * radius - half_chord * half_chord)
+                        center_distance = (
+                            direction_sign
+                            * (-1 if large_arc else 1)
+                            * math.sqrt(
+                                max(
+                                    0,
+                                    radius * radius - half_chord * half_chord,
+                                )
+                            )
                         )
                         chord_mid_x = (current_x + next_x) / 2
                         chord_mid_y = (current_y + next_y) / 2
@@ -1248,6 +1273,7 @@ class ShapeCmd(Application):
                                 "midpoint": arc_midpoint,
                                 "handle_offset": handle_offset,
                                 "direction": direction,
+                                "large_arc": large_arc,
                             }
                         )
                     else:
@@ -2036,14 +2062,21 @@ class ShapeCmd(Application):
         )
         sagitta = handle["handle_offset"] - direction_sign * handle_distance
         minimum_sagitta = max(1e-6, half_chord * 1e-6)
-        sagitta = min(half_chord, max(minimum_sagitta, sagitta))
+        sagitta = max(minimum_sagitta, sagitta)
         radius = (
             half_chord * half_chord + sagitta * sagitta
         ) / (2 * sagitta)
+        large_arc = sagitta > half_chord
 
         command = handle["command"]
         with command:
             command[3] = round(radius, 2)
+            while len(command) <= 4:
+                command.append("CCW")
+            if len(command) <= 5:
+                command.append(large_arc)
+            else:
+                command[5] = large_arc
         self.normalize_command(command, self.focused_path_commands)
 
     def paint_canvas(self, canvas):
