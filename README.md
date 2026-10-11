@@ -111,7 +111,10 @@ segments.
 - `Show`/`Hide` next to a shape name: expand or collapse its commands. Shapes
   are collapsed by default.
 - Each expanded shape has its own command table. Double-click a cell to edit
-  it; Command and Direction cells use drop-down editors.
+  it; for paths, the leftmost read-only column shows the zero-based command
+  index as its endpoint index. The path-start index `0` is hidden, so visible
+  endpoint indexes begin at `1`. Command and Direction cells use drop-down
+  editors.
 - Changing a command type re-enters placement mode. Direct-position commands
   follow the pointer, `Turn` places its endpoint, and path arcs place their
   center.
@@ -136,7 +139,8 @@ segments.
   and `rotateDeg`.
 - `Path` and `ClosedPath`: starting point, editable command endpoints, and a
   midpoint handle on every segment. Dragging a midpoint translates both
-  endpoints of that segment.
+  endpoints of that segment. Handle tooltips use the same zero-based endpoint
+  indexes shown in the command table.
 - Path arcs: center, endpoint, the original `R/2` radius handle on the start
   side, and a second radius handle halfway from the center to the arc midpoint.
   Dragging the midpoint handle preserves the arc endpoint.

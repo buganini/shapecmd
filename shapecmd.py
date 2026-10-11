@@ -60,7 +60,8 @@ class ShapeCommandTable(Table):
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         if self.children:
-            self.ui.setColumnWidth(0, 120)
+            self.ui.setColumnWidth(0, 36)
+            self.ui.setColumnWidth(1, 120)
         self.ui.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
         self.ui.setSelectionBehavior(
             QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
@@ -303,6 +304,11 @@ class ShapeCmd(Application):
 
                                 if self.state.shape_expanded[shape_idx]:
                                     commands = shape["commands"]
+                                    is_path = bool(
+                                        commands
+                                        and commands[0][0]
+                                        in ("Path", "ClosedPath")
+                                    )
                                     parameter_counts = [
                                         len(self.COMMAND_PARAMETERS.get(cmd[0], ()))
                                         for cmd in commands
@@ -317,7 +323,7 @@ class ShapeCmd(Application):
                                         ShapeCommandTable(
                                             columnHeader=None,
                                             rowHeader=None,
-                                            columnCount=1 + max_parameters,
+                                            columnCount=2 + max_parameters,
                                         )
                                         .id(f"commands-{shape_idx}")
                                         .layout(height=table_height, weight=0)
@@ -335,6 +341,11 @@ class ShapeCmd(Application):
                                                 else self.NEXT_COMMANDS
                                             )
                                             with TableNode():
+                                                TableNode(
+                                                    str(cmd_idx)
+                                                    if is_path and cmd_idx > 0
+                                                    else ""
+                                                )
                                                 (
                                                     TableNode(
                                                         str(cmd[0]),
@@ -952,7 +963,7 @@ class ShapeCmd(Application):
         previous_endpoint_handle = handles[0]
         heading = 0.0
 
-        for command in list(commands)[1:]:
+        for endpoint_index, command in enumerate(list(commands)[1:], start=1):
             if not command:
                 continue
 
@@ -1172,6 +1183,9 @@ class ShapeCmd(Application):
             except (TypeError, ValueError):
                 continue
 
+            for handle in handles[handle_start_index:]:
+                handle["endpoint_index"] = endpoint_index
+
             endpoint_handle = next(
                 (
                     handle
@@ -1200,6 +1214,10 @@ class ShapeCmd(Application):
                         "point": midpoint,
                         "start_handle": previous_endpoint_handle,
                         "end_handle": endpoint_handle,
+                        "endpoint_indices": (
+                            previous_endpoint_handle.get("endpoint_index"),
+                            endpoint_index,
+                        ),
                     }
                 )
             previous_endpoint_handle = endpoint_handle
@@ -1214,6 +1232,10 @@ class ShapeCmd(Application):
                     "point": midpoint,
                     "start_handle": previous_endpoint_handle,
                     "end_handle": handles[0],
+                    "endpoint_indices": (
+                        previous_endpoint_handle.get("endpoint_index"),
+                        None,
+                    ),
                 }
             )
         return {"points": points, "handles": handles}
@@ -2152,17 +2174,38 @@ class ShapeCmd(Application):
     def hovered_control_handle(self, canvas_x, canvas_y):
         handle = self.focused_handle_at(canvas_x, canvas_y)
         if handle is not None:
-            return handle
+            return handle, None
 
         handle = self.focused_standalone_handle_at(canvas_x, canvas_y)
         if handle is not None:
-            return handle["kind"]
+            return handle["kind"], None
 
         handle = self.focused_path_handle_at(canvas_x, canvas_y)
         if handle is not None:
-            return handle["kind"]
+            return handle["kind"], handle
 
         return None
+
+    def control_handle_tooltip(self, kind, handle):
+        tooltip = self.HANDLE_TOOLTIPS.get(kind)
+        if tooltip is None or handle is None:
+            return tooltip
+
+        endpoint_indices = handle.get("endpoint_indices")
+        if endpoint_indices is not None:
+            start_index, end_index = endpoint_indices
+            if start_index is None:
+                return f"Start–Endpoint {end_index}: {tooltip}"
+            if end_index is None:
+                return f"Endpoint {start_index}–Start: {tooltip}"
+            return (
+                f"Endpoints {start_index}–{end_index}: {tooltip}"
+            )
+
+        endpoint_index = handle.get("endpoint_index")
+        if endpoint_index is not None:
+            return f"Endpoint {endpoint_index}: {tooltip}"
+        return tooltip
 
     def hide_handle_tooltip(self):
         self.handle_tooltip = None
@@ -2172,12 +2215,13 @@ class ShapeCmd(Application):
             self.hide_handle_tooltip()
             return
 
-        kind = self.hovered_control_handle(canvas_x, canvas_y)
-        if kind is None:
+        hovered = self.hovered_control_handle(canvas_x, canvas_y)
+        if hovered is None:
             self.hide_handle_tooltip()
             return
 
-        tooltip = self.HANDLE_TOOLTIPS.get(kind)
+        kind, handle = hovered
+        tooltip = self.control_handle_tooltip(kind, handle)
         if tooltip is None:
             self.hide_handle_tooltip()
             return
