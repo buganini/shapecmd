@@ -4,6 +4,18 @@ import sys
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
+import PUI
+
+MINIMUM_PUI_VERSION = (0, 49)
+installed_pui_version = tuple(int(part) for part in PUI.__version__.split("."))
+if installed_pui_version < MINIMUM_PUI_VERSION:
+    required_version = ".".join(str(part) for part in MINIMUM_PUI_VERSION)
+    raise RuntimeError(
+        f"ShapeCmd requires PUI {required_version} or newer; "
+        f"found {PUI.__version__}. "
+        f'Run: pip install -U "QPUIQ>={required_version}"'
+    )
+
 from PUI.PySide6 import *
 from PySide6 import QtCore, QtWidgets
 
