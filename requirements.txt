@@ -1,0 +1,2 @@
+PySide6_Essentials
+QPUIQ>=0.48
