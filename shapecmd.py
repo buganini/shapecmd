@@ -107,6 +107,24 @@ class ShapeCmd(Application):
         "BezierTo",
         "ArcTo",
     }
+    SHAPE_TARGET_HANDLE_KINDS = {
+        "to_shape",
+        "to_shape_edge",
+        "bezier_to_shape",
+        "bezier_to_shape_edge",
+        "arc_to_shape",
+        "arc_to_shape_edge",
+    }
+    ARC_TO_COMMANDS = {
+        "ArcTo",
+        "ArcToShape",
+        "ArcToShapeEdge",
+    }
+    ARC_TO_LAYOUTS = {
+        "ArcTo": (3, 4, 5, "arc_to"),
+        "ArcToShape": (2, 3, 4, "arc_to_shape"),
+        "ArcToShapeEdge": (2, 3, 4, "arc_to_shape_edge"),
+    }
     HANDLE_TOOLTIPS = {
         "center": "Center",
         "radius": "Radius",
@@ -123,6 +141,8 @@ class ShapeCmd(Application):
         "path_start": "Path start",
         "to": "Endpoint",
         "bezier_to": "Bezier endpoint",
+        "bezier_to_shape": "Bezier target shape position",
+        "bezier_to_shape_edge": "Bezier endpoint on target shape",
         "to_shape": "Target shape position",
         "to_shape_edge": "Nearest point on target shape",
         "polar_to": "PolarTo angle and distance",
@@ -130,6 +150,8 @@ class ShapeCmd(Application):
         "arc_radius": "Arc radius",
         "arc_end": "Arc endpoint",
         "arc_to": "ArcTo endpoint",
+        "arc_to_shape": "ArcTo target shape position",
+        "arc_to_shape_edge": "ArcTo endpoint on target shape",
         "arc_to_radius": "ArcTo radius",
         "segment_midpoint": "Move both endpoints",
     }
@@ -148,9 +170,13 @@ class ShapeCmd(Application):
         "ArcDegree",
         "ArcLength",
         "ArcTo",
+        "ArcToShape",
+        "ArcToShapeEdge",
         "PolarTo",
         "To",
         "BezierTo",
+        "BezierToShape",
+        "BezierToShapeEdge",
         "ToShape",
         "ToShapeEdge",
     )
@@ -210,9 +236,21 @@ class ShapeCmd(Application):
             ("radius", DEFAULT_RADIUS),
             ("direction", "CCW"),
         ),
+        "ArcToShape": (
+            ("name", ""),
+            ("radius", DEFAULT_RADIUS),
+            ("direction", "CCW"),
+        ),
+        "ArcToShapeEdge": (
+            ("name", ""),
+            ("radius", DEFAULT_RADIUS),
+            ("direction", "CCW"),
+        ),
         "PolarTo": (("angle", 0), ("distance", 0)),
         "To": (("x", 0), ("y", 0)),
         "BezierTo": (("x", 0), ("y", 0)),
+        "BezierToShape": (("name", ""),),
+        "BezierToShapeEdge": (("name", ""),),
         "ToShape": (("name", ""),),
         "ToShapeEdge": (("name", ""),),
     }
@@ -298,7 +336,11 @@ class ShapeCmd(Application):
                 command[4] = sides
             return
 
-        if command_name != "ArcTo" or commands is None or len(command) < 4:
+        arc_layout = self.ARC_TO_LAYOUTS.get(command_name)
+        if arc_layout is None or commands is None:
+            return
+        radius_index, _, _, endpoint_kind = arc_layout
+        if len(command) <= radius_index:
             return
 
         geometry = self.path_geometry(commands, closed=False)
@@ -306,7 +348,8 @@ class ShapeCmd(Application):
             (
                 handle
                 for handle in geometry["handles"]
-                if handle["command"] is command and handle["kind"] == "arc_to"
+                if handle["command"] is command
+                and handle["kind"] == endpoint_kind
             ),
             None,
         )
@@ -320,11 +363,11 @@ class ShapeCmd(Application):
             (target_x, target_y),
         )
         try:
-            radius = abs(float(command[3]))
+            radius = abs(float(command[radius_index]))
         except (TypeError, ValueError):
             radius = minimum_radius
         with command:
-            command[3] = max(round(radius, 2), minimum_radius)
+            command[radius_index] = max(round(radius, 2), minimum_radius)
 
     def content(self):
         with Window(title="ShapeCmd", maximize=True).keypress(
@@ -1055,10 +1098,32 @@ class ShapeCmd(Application):
                         }
                     )
 
-                elif command_name == "BezierTo" and len(command) >= 3:
+                elif command_name in (
+                    "BezierTo",
+                    "BezierToShape",
+                    "BezierToShapeEdge",
+                ):
                     start_x, start_y = current_x, current_y
-                    next_x = float(command[1])
-                    next_y = float(command[2])
+                    if command_name == "BezierTo" and len(command) >= 3:
+                        next_point = (float(command[1]), float(command[2]))
+                        handle_kind = "bezier_to"
+                    elif len(command) >= 2:
+                        if command_name == "BezierToShape":
+                            next_point = self.named_shape_xy(command[1])
+                            handle_kind = "bezier_to_shape"
+                        else:
+                            next_point = self.closest_point_on_named_shape(
+                                (current_x, current_y),
+                                command[1],
+                                resolving,
+                            )
+                            handle_kind = "bezier_to_shape_edge"
+                    else:
+                        continue
+                    if next_point is None:
+                        continue
+
+                    next_x, next_y = next_point
                     delta_x = next_x - start_x
                     delta_y = next_y - start_y
                     distance = math.hypot(delta_x, delta_y)
@@ -1102,7 +1167,7 @@ class ShapeCmd(Application):
 
                     handles.append(
                         {
-                            "kind": "bezier_to",
+                            "kind": handle_kind,
                             "command": command,
                             "point": (current_x, current_y),
                         }
@@ -1160,24 +1225,51 @@ class ShapeCmd(Application):
                         }
                     )
 
-                elif command_name == "ArcTo" and len(command) >= 4:
+                elif command_name in self.ARC_TO_COMMANDS:
                     arc_start = (current_x, current_y)
-                    next_x = float(command[1])
-                    next_y = float(command[2])
+                    (
+                        radius_index,
+                        direction_index,
+                        large_arc_index,
+                        endpoint_kind,
+                    ) = self.ARC_TO_LAYOUTS[command_name]
+                    if len(command) <= radius_index:
+                        continue
+                    if command_name == "ArcTo":
+                        next_point = (float(command[1]), float(command[2]))
+                    elif command_name == "ArcToShape":
+                        next_point = self.named_shape_xy(command[1])
+                    else:
+                        next_point = self.closest_point_on_named_shape(
+                            (current_x, current_y),
+                            command[1],
+                            resolving,
+                        )
+                    if next_point is None:
+                        continue
+
+                    next_x, next_y = next_point
                     chord_x = next_x - current_x
                     chord_y = next_y - current_y
                     chord_length = math.hypot(chord_x, chord_y)
-                    radius = max(abs(float(command[3])), chord_length / 2)
+                    radius = max(
+                        abs(float(command[radius_index])),
+                        chord_length / 2,
+                    )
                     direction = (
-                        str(command[4]).upper() if len(command) >= 5 else "CCW"
+                        str(command[direction_index]).upper()
+                        if len(command) > direction_index
+                        else "CCW"
                     )
                     if direction not in ("CW", "CCW"):
                         direction = "CCW"
                     large_arc = (
-                        command[5]
-                        if len(command) >= 6 and isinstance(command[5], bool)
-                        else str(command[5]).lower() in ("true", "1", "major")
-                        if len(command) >= 6
+                        command[large_arc_index]
+                        if len(command) > large_arc_index
+                        and isinstance(command[large_arc_index], bool)
+                        else str(command[large_arc_index]).lower()
+                        in ("true", "1", "major")
+                        if len(command) > large_arc_index
                         else False
                     )
 
@@ -1264,6 +1356,8 @@ class ShapeCmd(Application):
                                 "handle_offset": handle_offset,
                                 "direction": direction,
                                 "large_arc": large_arc,
+                                "radius_index": radius_index,
+                                "large_arc_index": large_arc_index,
                             }
                         )
                     else:
@@ -1271,7 +1365,7 @@ class ShapeCmd(Application):
 
                     handles.append(
                         {
-                            "kind": "arc_to",
+                            "kind": endpoint_kind,
                             "command": command,
                             "point": (current_x, current_y),
                             "start": arc_start,
@@ -1360,10 +1454,14 @@ class ShapeCmd(Application):
                     in {
                         "to",
                         "bezier_to",
+                        "bezier_to_shape",
+                        "bezier_to_shape_edge",
                         "to_shape",
                         "to_shape_edge",
                         "polar_to",
                         "arc_to",
+                        "arc_to_shape",
+                        "arc_to_shape_edge",
                         "arc_end",
                     }
                 ),
@@ -1893,7 +1991,7 @@ class ShapeCmd(Application):
     def translate_path_endpoint(self, handle, delta_x, delta_y, moved_shapes):
         kind = handle["kind"]
         command = handle["command"]
-        if kind in ("to_shape", "to_shape_edge"):
+        if kind in self.SHAPE_TARGET_HANDLE_KINDS:
             shape_name = str(command[1])
             if shape_name in moved_shapes:
                 return
@@ -1901,6 +1999,8 @@ class ShapeCmd(Application):
             if target_shape is not None:
                 self.translate_shape(target_shape, delta_x, delta_y)
                 moved_shapes.add(shape_name)
+                if command[0] in self.ARC_TO_COMMANDS:
+                    self.normalize_command(command, self.focused_path_commands)
             return
 
         self.move_path_endpoint_to(
@@ -1942,7 +2042,7 @@ class ShapeCmd(Application):
             return
 
         end_handle = updated_handle["end_handle"]
-        if end_handle["kind"] in ("to_shape", "to_shape_edge"):
+        if end_handle["kind"] in self.SHAPE_TARGET_HANDLE_KINDS:
             self.translate_path_endpoint(
                 end_handle,
                 delta_x,
@@ -1964,7 +2064,7 @@ class ShapeCmd(Application):
 
         if kind == "segment_midpoint":
             self.drag_path_segment_midpoint(handle, target_x, target_y)
-        elif kind in ("to_shape", "to_shape_edge"):
+        elif kind in self.SHAPE_TARGET_HANDLE_KINDS:
             target_shape = self.shape_named(command[1])
             if target_shape is None or self.drag_position is None:
                 return
@@ -1972,6 +2072,8 @@ class ShapeCmd(Application):
             delta_y = world_y - self.drag_position[1]
             self.translate_shape(target_shape, delta_x, delta_y)
             self.drag_position = (world_x, world_y)
+            if command[0] in self.ARC_TO_COMMANDS:
+                self.normalize_command(command, self.focused_path_commands)
         elif kind in ("path_start", "to", "bezier_to", "arc_to"):
             self.move_path_endpoint_to(handle, target_x, target_y)
         elif kind == "polar_to":
@@ -2059,14 +2161,21 @@ class ShapeCmd(Application):
         large_arc = sagitta > half_chord
 
         command = handle["command"]
+        radius_index = handle["radius_index"]
+        large_arc_index = handle["large_arc_index"]
+        defaults = (command[0],) + tuple(
+            default
+            for _, default in self.COMMAND_PARAMETERS.get(command[0], ())
+        )
         with command:
-            command[3] = round(radius, 2)
-            while len(command) <= 4:
-                command.append("CCW")
-            if len(command) <= 5:
-                command.append(large_arc)
-            else:
-                command[5] = large_arc
+            command[radius_index] = round(radius, 2)
+            while len(command) <= large_arc_index:
+                command.append(
+                    defaults[len(command)]
+                    if len(command) < len(defaults)
+                    else False
+                )
+            command[large_arc_index] = large_arc
         self.normalize_command(command, self.focused_path_commands)
 
     def paint_canvas(self, canvas):
@@ -2539,10 +2648,16 @@ class ShapeCmd(Application):
                 command[2] = round(math.hypot(delta_x, delta_y), 2)
             return
 
-        if command_name in ("ToShape", "ToShapeEdge") and len(command) >= 2:
-            handle_kind = (
-                "to_shape" if command_name == "ToShape" else "to_shape_edge"
-            )
+        target_handle_kinds = {
+            "ToShape": "to_shape",
+            "ToShapeEdge": "to_shape_edge",
+            "BezierToShape": "bezier_to_shape",
+            "BezierToShapeEdge": "bezier_to_shape_edge",
+            "ArcToShape": "arc_to_shape",
+            "ArcToShapeEdge": "arc_to_shape_edge",
+        }
+        if command_name in target_handle_kinds and len(command) >= 2:
+            handle_kind = target_handle_kinds[command_name]
             handle = next(
                 (handle for handle in handles if handle["kind"] == handle_kind),
                 None,
@@ -2556,6 +2671,8 @@ class ShapeCmd(Application):
                 world_x - handle_x,
                 world_y - handle_y,
             )
+            if command_name in self.ARC_TO_COMMANDS:
+                self.normalize_command(command, self.placement_commands)
 
     def begin_placement(
         self,

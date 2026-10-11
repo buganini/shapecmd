@@ -87,6 +87,27 @@
                     -287.67,
                     218.48,
                     "CCW"
+                ],
+                [
+                    "BezierToShape",
+                    "crect"
+                ],
+                [
+                    "BezierToShapeEdge",
+                    "point"
+                ],
+                [
+                    "ArcToShape",
+                    "poly",
+                    590.32,
+                    "CW"
+                ],
+                [
+                    "ArcToShapeEdge",
+                    "arc",
+                    10112712.43,
+                    "CW",
+                    false
                 ]
             ]
         },
@@ -104,15 +125,52 @@
             ]
         },
         {
-            "name": "",
+            "name": "crect",
             "commands": [
                 [
                     "CenterRect",
-                    -253.0,
-                    -124.0,
+                    -281.11,
+                    -218.26,
                     256.0,
                     140.0,
                     -21.69
+                ]
+            ]
+        },
+        {
+            "name": "point",
+            "commands": [
+                [
+                    "Point",
+                    -397.81,
+                    35.67
+                ]
+            ]
+        },
+        {
+            "name": "poly",
+            "commands": [
+                [
+                    "RegularPolygon",
+                    574.55,
+                    705.33,
+                    50,
+                    5,
+                    0
+                ]
+            ]
+        },
+        {
+            "name": "arc",
+            "commands": [
+                [
+                    "Arc",
+                    867.24,
+                    829.7,
+                    137.85,
+                    141.24,
+                    117.3,
+                    "CCW"
                 ]
             ]
         }

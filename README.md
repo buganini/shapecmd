@@ -73,9 +73,13 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | `To` | `x, y` | Draws to an absolute coordinate. |
 | `PolarTo` | `angle, distance` | Turns relative to the current heading, then advances by the specified distance. |
 | `BezierTo` | `x, y` | Draws to the endpoint using cubic Bézier control points calculated from the previous heading. |
+| `BezierToShape` | `name` | Draws a cubic Bézier to the target shape's reference x/y coordinate. |
+| `BezierToShapeEdge` | `name` | Draws a cubic Bézier to the nearest point on the target shape's boundary. |
 | `ArcDegree` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
 | `ArcLength` | `angle, radius, arcLength, direction` | Draws an arc from the current point with its extent specified as a linear arc length. |
 | `ArcTo` | `x, y, radius, direction[, largeArc]` | Draws an arc to a fixed endpoint. The optional `largeArc` value is maintained automatically while dragging (`false` for ≤180°, `true` for >180°) and is not shown as an editable table field. The radius is clamped to at least half the distance from the start to the endpoint, and the corrected value is written back to the model. |
+| `ArcToShape` | `name, radius, direction[, largeArc]` | Draws an arc to the target shape's reference x/y coordinate. `largeArc` is maintained automatically. |
+| `ArcToShapeEdge` | `name, radius, direction[, largeArc]` | Draws an arc to the nearest point on the target shape's boundary. `largeArc` is maintained automatically. |
 | `ToShape` | `name` | Draws to the target shape's reference x/y coordinate. |
 | `ToShapeEdge` | `name` | Draws to the nearest point on the target shape's boundary. |
 
@@ -89,7 +93,8 @@ the minimum radius produces a semicircle.
 Radius parameters and `arcLength` default to `50`. Degree-based arc spans
 default to `30`.
 
-The reference x/y coordinate used by `ToShape` depends on the target shape:
+The reference x/y coordinate used by `*ToShape` commands depends on the target
+shape:
 
 - `Point`: point coordinates.
 - `Circle`, `Arc`, `CenterRect`, and `RegularPolygon`: center coordinates.
@@ -97,9 +102,9 @@ The reference x/y coordinate used by `ToShape` depends on the target shape:
 - `Path` and `ClosedPath`: starting coordinates.
 
 Referenced shapes should have unique, non-empty names. If multiple shapes have
-the same name, the first match is used. `ToShapeEdge` calculates an exact nearest
-point for circles and approximates other shapes using their rendered line
-segments.
+the same name, the first match is used. `*ToShapeEdge` commands calculate an
+exact nearest point for circles and approximate other shapes using their
+rendered line segments.
 
 ## Controls
 
@@ -146,10 +151,10 @@ segments.
   indexes shown in the command table.
 - `ArcDegree` and `ArcLength`: center, endpoint, and the original `R/2` radius
   handle on the start side.
-- `ArcTo`: endpoint and a radius handle on a short, fixed-screen-length stem
-  extending from the arc midpoint toward the center. Dragging it preserves
-  both endpoints and direction without displaying the full radius. Moving the
-  handle through the semicircle position automatically switches between minor
-  and major arcs.
-- `ToShape` and `ToShapeEdge`: dragging the derived endpoint moves the referenced
-  target shape.
+- `ArcTo`, `ArcToShape`, and `ArcToShapeEdge`: endpoint and a radius handle on a
+  short, fixed-screen-length stem extending from the arc midpoint toward the
+  center. Dragging it preserves both endpoints and direction without displaying
+  the full radius. Moving the handle through the semicircle position
+  automatically switches between minor and major arcs.
+- All `*ToShape` and `*ToShapeEdge` commands: dragging the derived endpoint moves
+  the referenced target shape.
