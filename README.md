@@ -104,7 +104,9 @@ segments.
 - Drag an empty area with the left mouse button, or drag with the middle mouse
   button: pan the canvas.
 - Click a shape: focus it and enter edit mode.
-- `Fit`: fit all shapes inside the canvas with 100 px of padding.
+- The initial view automatically fits all shapes inside the canvas with 100 px
+  of padding.
+- `Fit`: restore the same fitted view at any time.
 - `Display Arrow`: show or hide direction arrows on the focused path.
 - `Show`/`Hide` next to a shape name: expand or collapse its commands. Shapes
   are collapsed by default.

@@ -186,7 +186,7 @@ class ShapeCmd(Application):
         return "".join(part.capitalize() for part in value.split("_"))
 
     def content(self):
-        with Window(title="ShapeCmd", size=(960, 640)):
+        with Window(title="ShapeCmd", maximize=True):
             with HBox():
                 with VBox().layout(weight=1):
                     with HBox():
@@ -281,7 +281,9 @@ class ShapeCmd(Application):
     def update_canvas_size(self, width, height):
         new_size = (width, height)
         if self.canvas_size is None:
-            self.view_origin = [width / 2, height / 2]
+            self.canvas_size = new_size
+            self.fit_view()
+            return
         elif self.canvas_size != new_size:
             old_width, old_height = self.canvas_size
             self.view_origin[0] += (width - old_width) / 2
@@ -1676,7 +1678,7 @@ class ShapeCmd(Application):
             max(bound[3] for bound in bounds),
         )
 
-    def fit_canvas(self, event):
+    def fit_view(self):
         if self.canvas_size is None:
             return
 
@@ -1685,7 +1687,6 @@ class ShapeCmd(Application):
         if bounds is None:
             self.view_origin = [width / 2, height / 2]
             self.zoom = 1.0
-            self.redraw()
             return
 
         min_x, min_y, max_x, max_y = bounds
@@ -1707,6 +1708,9 @@ class ShapeCmd(Application):
             width / 2 - center_x * self.zoom,
             height / 2 + center_y * self.zoom,
         ]
+
+    def fit_canvas(self, event):
+        self.fit_view()
         self.redraw()
 
     def move_placement_to_canvas(self, canvas_x, canvas_y):
