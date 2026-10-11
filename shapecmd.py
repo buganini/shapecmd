@@ -105,8 +105,9 @@ class ShapeCmd(Application):
 
     def __init__(self, input_path):
         super().__init__()
+        self.input_path = Path(input_path)
         self.state = State()
-        self.state.shapes = State(self.load_shapes(input_path), deep=True)
+        self.state.shapes = State(self.load_shapes(self.input_path), deep=True)
         self.canvas_size = None
         self.view_origin = None
         self.zoom = 1.0
@@ -216,7 +217,7 @@ class ShapeCmd(Application):
                                     Button("Add Next").click(self.add_next, shape)
                             Spacer()
                     Button("Add Shape").click(self.add_shape)
-                    Button("Dump").click(self.dump)
+                    Button("Save").click(self.save)
 
     def update_canvas_size(self, width, height):
         new_size = (width, height)
@@ -958,9 +959,12 @@ class ShapeCmd(Application):
             )
         )
 
-    def dump(self, event):
+    def save(self, event):
         data = {"shapes": Unstate(self.state.shapes)}
-        print(json.dumps(data, indent=4, ensure_ascii=False))
+        self.input_path.write_text(
+            json.dumps(data, indent=4, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":
