@@ -148,6 +148,10 @@ class ShapeCmd(Application):
 
         return data["shapes"]
 
+    @staticmethod
+    def parameter_label(value):
+        return "".join(part.capitalize() for part in value.split("_"))
+
     def content(self):
         with Window(title="ShapeCmd", size=(960, 640)):
             with HBox():
@@ -204,7 +208,7 @@ class ShapeCmd(Application):
                                             parameters,
                                             start=1,
                                         ):
-                                            Label(arg_name)
+                                            Label(self.parameter_label(arg_name))
                                             argument = ArgumentBinding(
                                                 cmd,
                                                 arg_idx,
