@@ -112,6 +112,7 @@ class ShapeCmd(Application):
         super().__init__()
         self.input_path = Path(input_path)
         self.state = State()
+        self.state.display_arrow = True
         self.state.shapes = State(self.load_shapes(self.input_path), deep=True)
         self.canvas_size = None
         self.view_origin = None
@@ -154,6 +155,10 @@ class ShapeCmd(Application):
                     with HBox():
                         Button("Fit").click(self.fit_canvas)
                         Spacer()
+                        Checkbox(
+                            "Display Arrow",
+                            self.state("display_arrow"),
+                        )
 
                     (
                         Canvas(self.paint_canvas)
@@ -167,7 +172,7 @@ class ShapeCmd(Application):
                         .wheel(self.canvas_wheel)
                     )
 
-                with VBox().layout(width=427):
+                with VBox().layout(width=300):
                     with Scroll():
                         with VBox():
                             for shape_idx, shape in enumerate(self.state.shapes):
@@ -185,7 +190,6 @@ class ShapeCmd(Application):
                                         default for _, default in parameters
                                     )
                                     with HBox():
-                                        Label("cmd")
                                         with ComboBox(
                                             editable=True,
                                             text_model=cmd(0),
@@ -213,13 +217,14 @@ class ShapeCmd(Application):
                                                     ComboBoxItem("CCW")
                                                     ComboBoxItem("CW")
                                             else:
-                                                TextField(argument).layout(weight=1)
+                                                TextField(argument).layout(width=64)
 
                                 if (
                                     shape["commands"]
                                     and shape["commands"][0][0] in ("Path", "ClosedPath")
                                 ):
                                     Button("Add Next").click(self.add_next, shape)
+                                Divider()
                             Spacer()
                     Button("Add Shape").click(self.add_shape)
                     Button("Save").click(self.save)
@@ -588,7 +593,8 @@ class ShapeCmd(Application):
         if not focused:
             return
 
-        self.draw_path_direction_arrows(canvas, canvas_points, color)
+        if self.state.display_arrow:
+            self.draw_path_direction_arrows(canvas, canvas_points, color)
 
         for handle in geometry["handles"]:
             point_x, point_y = self.world_to_canvas(*handle["point"])
