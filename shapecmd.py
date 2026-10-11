@@ -100,12 +100,19 @@ class ShapeCmd(Application):
             ("span_deg", DEFAULT_ARC_SPAN_DEGREES),
             ("direction", "CCW"),
         ),
-        "Rect": (("x", 0), ("y", 0), ("x_offset", 0), ("y_offset", 0)),
+        "Rect": (
+            ("x", 0),
+            ("y", 0),
+            ("x_offset", 0),
+            ("y_offset", 0),
+            ("rotate_deg", 0),
+        ),
         "CenterRect": (
             ("center_x", 0),
             ("center_y", 0),
             ("width", 0),
             ("height", 0),
+            ("rotate_deg", 0),
         ),
         "RegularPolygon": (
             ("center_x", 0),
@@ -479,15 +486,24 @@ class ShapeCmd(Application):
 
             if command_name == "Rect" and len(command) >= 5:
                 origin = (float(command[1]), float(command[2]))
-                corner = (
-                    origin[0] + float(command[3]),
-                    origin[1] + float(command[4]),
-                )
+                x_offset = float(command[3])
+                y_offset = float(command[4])
+                rotation = math.radians(float(command[5])) if len(command) >= 6 else 0
+                cosine = math.cos(rotation)
+                sine = math.sin(rotation)
+
+                def rect_point(local_x, local_y):
+                    return (
+                        origin[0] + local_x * cosine - local_y * sine,
+                        origin[1] + local_x * sine + local_y * cosine,
+                    )
+
+                corner = rect_point(x_offset, y_offset)
                 points = [
                     origin,
-                    (corner[0], origin[1]),
+                    rect_point(x_offset, 0),
                     corner,
-                    (origin[0], corner[1]),
+                    rect_point(0, y_offset),
                     origin,
                 ]
                 return {
@@ -498,6 +514,7 @@ class ShapeCmd(Application):
                             "kind": "rect_corner",
                             "point": corner,
                             "origin": origin,
+                            "rotation": rotation,
                         },
                     ],
                     "guides": [],
@@ -508,12 +525,22 @@ class ShapeCmd(Application):
                 center = (float(command[1]), float(command[2]))
                 half_width = abs(float(command[3])) / 2
                 half_height = abs(float(command[4])) / 2
-                corner = (center[0] + half_width, center[1] + half_height)
+                rotation = math.radians(float(command[5])) if len(command) >= 6 else 0
+                cosine = math.cos(rotation)
+                sine = math.sin(rotation)
+
+                def center_rect_point(local_x, local_y):
+                    return (
+                        center[0] + local_x * cosine - local_y * sine,
+                        center[1] + local_x * sine + local_y * cosine,
+                    )
+
+                corner = center_rect_point(half_width, half_height)
                 points = [
-                    (center[0] - half_width, center[1] - half_height),
-                    (center[0] + half_width, center[1] - half_height),
+                    center_rect_point(-half_width, -half_height),
+                    center_rect_point(half_width, -half_height),
                     corner,
-                    (center[0] - half_width, center[1] + half_height),
+                    center_rect_point(-half_width, half_height),
                 ]
                 points.append(points[0])
                 return {
@@ -524,6 +551,7 @@ class ShapeCmd(Application):
                             "kind": "center_rect_corner",
                             "point": corner,
                             "center": center,
+                            "rotation": rotation,
                         },
                     ],
                     "guides": [(center, corner)],
@@ -1261,12 +1289,22 @@ class ShapeCmd(Application):
                 command[2] = round(target_y, 2)
             elif kind == "rect_corner":
                 origin_x, origin_y = handle["origin"]
-                command[3] = round(target_x - origin_x, 2)
-                command[4] = round(target_y - origin_y, 2)
+                delta_x = target_x - origin_x
+                delta_y = target_y - origin_y
+                cosine = math.cos(handle["rotation"])
+                sine = math.sin(handle["rotation"])
+                command[3] = round(delta_x * cosine + delta_y * sine, 2)
+                command[4] = round(-delta_x * sine + delta_y * cosine, 2)
             elif kind == "center_rect_corner":
                 center_x, center_y = handle["center"]
-                command[3] = round(abs(target_x - center_x) * 2, 2)
-                command[4] = round(abs(target_y - center_y) * 2, 2)
+                delta_x = target_x - center_x
+                delta_y = target_y - center_y
+                cosine = math.cos(handle["rotation"])
+                sine = math.sin(handle["rotation"])
+                local_x = delta_x * cosine + delta_y * sine
+                local_y = -delta_x * sine + delta_y * cosine
+                command[3] = round(abs(local_x) * 2, 2)
+                command[4] = round(abs(local_y) * 2, 2)
             elif kind == "polygon_vertex":
                 center_x, center_y = handle["center"]
                 delta_x = target_x - center_x

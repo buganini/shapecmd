@@ -57,8 +57,8 @@ The first command of each shape must be one of the following:
 | `Point` | `x, y` | A single point. |
 | `Circle` | `centerX, centerY, radius` | A circle. |
 | `Arc` | `centerX, centerY, radius, startAngle, spanDeg, direction` | A standalone arc. `direction` is `CW` or `CCW`. |
-| `Rect` | `x, y, xOffset, yOffset` | A rectangle defined by an origin and offsets. |
-| `CenterRect` | `centerX, centerY, width, height` | A rectangle defined by its center and size. |
+| `Rect` | `x, y, xOffset, yOffset, rotateDeg` | A rectangle defined by an origin and local offsets, rotated around its origin. |
+| `CenterRect` | `centerX, centerY, width, height, rotateDeg` | A rectangle defined by its center and size, rotated around its center. |
 | `RegularPolygon` | `centerX, centerY, radius, sides, rotateDeg` | A regular polygon. Rendering uses a minimum of three sides. |
 | `Path` | `x, y` | The starting point of an open path. |
 | `ClosedPath` | `x, y` | A closed path that automatically returns to its starting point. |
