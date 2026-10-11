@@ -134,7 +134,9 @@ segments.
 - `CenterRect`: center, upper-right corner, and rotation handle.
 - `RegularPolygon`: center and first vertex. The vertex controls both the radius
   and `rotateDeg`.
-- `Path` and `ClosedPath`: starting point and editable command endpoints.
+- `Path` and `ClosedPath`: starting point, editable command endpoints, and a
+  midpoint handle on every segment. Dragging a midpoint translates both
+  endpoints of that segment.
 - Path arcs: center, endpoint, the original `R/2` radius handle on the start
   side, and a second radius handle halfway from the center to the arc midpoint.
   Dragging the midpoint handle preserves the arc endpoint.

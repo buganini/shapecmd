@@ -17,7 +17,7 @@ if installed_pui_version < MINIMUM_PUI_VERSION:
     )
 
 from PUI.PySide6 import *
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 
 class ArgumentBinding:
@@ -103,6 +103,31 @@ class ShapeCmd(Application):
         "ClosedPath",
         "To",
         "BezierTo",
+    }
+    HANDLE_TOOLTIPS = {
+        "center": "Center",
+        "radius": "Radius",
+        "point": "Position",
+        "shape_center": "Center",
+        "shape_radius": "Radius",
+        "arc_start": "Start angle and radius",
+        "shape_arc_end": "Arc span",
+        "rect_origin": "Origin",
+        "rect_corner": "Size",
+        "center_rect_corner": "Size",
+        "rect_rotation": "Rotation",
+        "polygon_vertex": "Radius and rotation",
+        "path_start": "Path start",
+        "to": "Endpoint",
+        "bezier_to": "Bezier endpoint",
+        "to_shape": "Target shape position",
+        "to_shape_edge": "Nearest point on target shape",
+        "turn": "Turn angle and distance",
+        "arc_center": "Arc center and radius",
+        "arc_radius": "Arc radius",
+        "arc_mid_radius": "Arc radius (fixed endpoint)",
+        "arc_end": "Arc endpoint",
+        "segment_midpoint": "Move both endpoints",
     }
 
     START_COMMANDS = (
@@ -205,6 +230,7 @@ class ShapeCmd(Application):
         self.placement_commands = None
         self.placement_remove_on_cancel = False
         self.cursor_position = None
+        self.handle_tooltip = None
 
     @staticmethod
     def load_shapes(input_path):
@@ -875,6 +901,32 @@ class ShapeCmd(Application):
 
         return None
 
+    @staticmethod
+    def polyline_midpoint(points):
+        segments = []
+        total_length = 0.0
+        for start, end in zip(points, points[1:]):
+            length = math.hypot(end[0] - start[0], end[1] - start[1])
+            segments.append((start, end, length))
+            total_length += length
+
+        if not segments:
+            return points[0] if points else None
+        if not total_length:
+            return segments[0][0]
+
+        target = total_length / 2
+        offset = 0.0
+        for start, end, length in segments:
+            if offset + length >= target:
+                fraction = (target - offset) / length if length else 0
+                return (
+                    start[0] + (end[0] - start[0]) * fraction,
+                    start[1] + (end[1] - start[1]) * fraction,
+                )
+            offset += length
+        return segments[-1][1]
+
     def path_geometry(self, commands, closed=False, resolving=None):
         resolving = set() if resolving is None else set(resolving)
         commands_identity = id(commands)
@@ -897,6 +949,7 @@ class ShapeCmd(Application):
                 "point": start_point,
             }
         ]
+        previous_endpoint_handle = handles[0]
         heading = 0.0
 
         for command in list(commands)[1:]:
@@ -904,6 +957,8 @@ class ShapeCmd(Application):
                 continue
 
             command_name = command[0]
+            segment_start_index = len(points) - 1
+            handle_start_index = len(handles)
             try:
                 if command_name == "To" and len(command) >= 3:
                     next_x = float(command[1])
@@ -1107,16 +1162,60 @@ class ShapeCmd(Application):
                                 "kind": "arc_end",
                                 "command": command,
                                 "point": (current_x, current_y),
+                                "start": arc_start,
                                 "center": (center_x, center_y),
                                 "start_angle": angle,
+                                "span": span,
                             },
                         ]
                     )
             except (TypeError, ValueError):
                 continue
 
+            endpoint_handle = next(
+                (
+                    handle
+                    for handle in reversed(handles[handle_start_index:])
+                    if handle["kind"]
+                    in {
+                        "to",
+                        "bezier_to",
+                        "to_shape",
+                        "to_shape_edge",
+                        "turn",
+                        "arc_end",
+                    }
+                ),
+                None,
+            )
+            if endpoint_handle is None:
+                continue
+
+            midpoint = self.polyline_midpoint(points[segment_start_index:])
+            if midpoint is not None:
+                handles.append(
+                    {
+                        "kind": "segment_midpoint",
+                        "command": command,
+                        "point": midpoint,
+                        "start_handle": previous_endpoint_handle,
+                        "end_handle": endpoint_handle,
+                    }
+                )
+            previous_endpoint_handle = endpoint_handle
+
         if closed and points[-1] != start_point:
+            midpoint = self.polyline_midpoint([points[-1], start_point])
             points.append(start_point)
+            handles.append(
+                {
+                    "kind": "segment_midpoint",
+                    "command": commands[0],
+                    "point": midpoint,
+                    "start_handle": previous_endpoint_handle,
+                    "end_handle": handles[0],
+                }
+            )
         return {"points": points, "handles": handles}
 
     def path_points(self, commands, closed=False):
@@ -1240,19 +1339,28 @@ class ShapeCmd(Application):
                     color=0xFBBF24,
                 )
 
-            canvas.drawEllipse(
-                point_x,
-                point_y,
-                self.HANDLE_RADIUS,
-                self.HANDLE_RADIUS,
-                fill=(
-                    0xF59E0B
-                    if handle["kind"] in ("path_start", "arc_center")
-                    else 0xFFFFFF
-                ),
-                stroke=0xF59E0B,
-                width=2,
-            )
+            if handle["kind"] == "segment_midpoint":
+                canvas.drawRect(
+                    point_x - self.HANDLE_RADIUS,
+                    point_y - self.HANDLE_RADIUS,
+                    point_x + self.HANDLE_RADIUS,
+                    point_y + self.HANDLE_RADIUS,
+                    fill=0xF59E0B,
+                )
+            else:
+                canvas.drawEllipse(
+                    point_x,
+                    point_y,
+                    self.HANDLE_RADIUS,
+                    self.HANDLE_RADIUS,
+                    fill=(
+                        0xF59E0B
+                        if handle["kind"] in ("path_start", "arc_center")
+                        else 0xFFFFFF
+                    ),
+                    stroke=0xF59E0B,
+                    width=2,
+                )
 
     def circle_commands(self):
         for shape in self.state.shapes:
@@ -1543,6 +1651,117 @@ class ShapeCmd(Application):
     def signed_angle_delta(angle):
         return (angle + math.pi) % (2 * math.pi) - math.pi
 
+    def move_path_endpoint_to(self, handle, target_x, target_y):
+        command = handle["command"]
+        kind = handle["kind"]
+
+        if kind in ("path_start", "to", "bezier_to"):
+            with command:
+                command[1] = round(target_x, 2)
+                command[2] = round(target_y, 2)
+            return
+
+        if kind == "turn":
+            origin_x, origin_y = handle["origin"]
+            delta_x = target_x - origin_x
+            delta_y = target_y - origin_y
+            distance = math.hypot(delta_x, delta_y)
+            new_heading = (
+                math.atan2(delta_y, delta_x)
+                if distance
+                else handle["heading_before"]
+            )
+            turn_angle = self.signed_angle_delta(
+                new_heading - handle["heading_before"]
+            )
+            with command:
+                command[1] = round(math.degrees(turn_angle), 2)
+                command[2] = round(distance, 2)
+            return
+
+        if kind != "arc_end":
+            return
+
+        start_x, start_y = handle["start"]
+        chord_x = target_x - start_x
+        chord_y = target_y - start_y
+        chord_length = math.hypot(chord_x, chord_y)
+        span = handle["span"]
+        half_span_sine = abs(math.sin(span / 2))
+        if chord_length <= 1e-9 or half_span_sine <= 1e-9:
+            return
+
+        radius = chord_length / (2 * half_span_sine)
+        chord_angle = math.atan2(chord_y, chord_x)
+        start_angle = chord_angle - span / 2 - math.copysign(math.pi / 2, span)
+        with command:
+            command[1] = round(math.degrees(start_angle), 2)
+            command[2] = round(radius, 2)
+            if command[0] == "ArcLength":
+                command[3] = round(abs(span) * radius, 2)
+
+    def translate_path_endpoint(self, handle, delta_x, delta_y, moved_shapes):
+        kind = handle["kind"]
+        command = handle["command"]
+        if kind in ("to_shape", "to_shape_edge"):
+            shape_name = str(command[1])
+            if shape_name in moved_shapes:
+                return
+            target_shape = self.shape_named(shape_name)
+            if target_shape is not None:
+                self.translate_shape(target_shape, delta_x, delta_y)
+                moved_shapes.add(shape_name)
+            return
+
+        self.move_path_endpoint_to(
+            handle,
+            handle["point"][0] + delta_x,
+            handle["point"][1] + delta_y,
+        )
+
+    def drag_path_segment_midpoint(self, handle, target_x, target_y):
+        delta_x = target_x - handle["point"][0]
+        delta_y = target_y - handle["point"][1]
+        if not delta_x and not delta_y:
+            return
+
+        desired_end = (
+            handle["end_handle"]["point"][0] + delta_x,
+            handle["end_handle"]["point"][1] + delta_y,
+        )
+        moved_shapes = set()
+        self.translate_path_endpoint(
+            handle["start_handle"],
+            delta_x,
+            delta_y,
+            moved_shapes,
+        )
+
+        closed = self.focused_path_commands[0][0] == "ClosedPath"
+        geometry = self.path_geometry(self.focused_path_commands, closed=closed)
+        updated_handle = next(
+            (
+                candidate
+                for candidate in geometry["handles"]
+                if candidate["command"] is handle["command"]
+                and candidate["kind"] == "segment_midpoint"
+            ),
+            None,
+        )
+        if updated_handle is None:
+            return
+
+        end_handle = updated_handle["end_handle"]
+        if end_handle["kind"] in ("to_shape", "to_shape_edge"):
+            self.translate_path_endpoint(
+                end_handle,
+                delta_x,
+                delta_y,
+                moved_shapes,
+            )
+        else:
+            self.move_path_endpoint_to(end_handle, *desired_end)
+
     def drag_path_handle(self, world_x, world_y):
         handle = self.current_path_handle()
         if handle is None:
@@ -1553,7 +1772,9 @@ class ShapeCmd(Application):
         target_y = world_y + self.drag_offset[1]
         kind = handle["kind"]
 
-        if kind in ("to_shape", "to_shape_edge"):
+        if kind == "segment_midpoint":
+            self.drag_path_segment_midpoint(handle, target_x, target_y)
+        elif kind in ("to_shape", "to_shape_edge"):
             target_shape = self.shape_named(command[1])
             if target_shape is None or self.drag_position is None:
                 return
@@ -1760,12 +1981,57 @@ class ShapeCmd(Application):
                 color=0x555555,
             )
 
+        self.draw_handle_tooltip(canvas)
+
+    def draw_handle_tooltip(self, canvas):
+        if self.handle_tooltip is None:
+            return
+
+        text, cursor_x, cursor_y = self.handle_tooltip
+        font = canvas.qpainter.font()
+        font.setPointSize(12)
+        metrics = QtGui.QFontMetrics(font)
+        padding_x = 5
+        padding_y = 3
+        width = metrics.horizontalAdvance(text) + padding_x * 2
+        height = metrics.height() + padding_y * 2
+        left = cursor_x + 12
+        top = cursor_y + 16
+
+        if left + width > canvas.width - 4:
+            left = cursor_x - width - 12
+        if top + height > canvas.height - 4:
+            top = cursor_y - height - 12
+        left = max(4, left)
+        top = max(4, top)
+
+        canvas.drawRect(
+            left,
+            top,
+            left + width,
+            top + height,
+            fill=0x242424,
+            stroke=0x606060,
+            width=1,
+        )
+        canvas.drawText(
+            left + padding_x,
+            top + padding_y,
+            text,
+            w=width - padding_x * 2,
+            h=height - padding_y * 2,
+            size=12,
+            color=0xFFFFFF,
+        )
+
     def canvas_mouseenter(self, event):
         self.cursor_position = (event.x, event.y)
         self.move_placement_to_canvas(event.x, event.y)
+        self.update_handle_tooltip(event.x, event.y)
         self.redraw()
 
     def canvas_mouseleave(self, event):
+        self.hide_handle_tooltip()
         self.cursor_position = None
         self.drag_action = None
         self.drag_target = None
@@ -1777,6 +2043,8 @@ class ShapeCmd(Application):
     def canvas_mousedown(self, event):
         if event.button not in (MouseButton.LEFT, MouseButton.MIDDLE):
             return
+        self.hide_handle_tooltip()
+        self.redraw()
         self.cursor_position = (event.x, event.y)
         self.drag_arc_state = None
 
@@ -1878,7 +2146,43 @@ class ShapeCmd(Application):
         self.drag_offset = None
         self.drag_arc_state = None
         self.cursor_position = (event.x, event.y)
+        self.update_handle_tooltip(event.x, event.y)
         self.redraw()
+
+    def hovered_control_handle(self, canvas_x, canvas_y):
+        handle = self.focused_handle_at(canvas_x, canvas_y)
+        if handle is not None:
+            return handle
+
+        handle = self.focused_standalone_handle_at(canvas_x, canvas_y)
+        if handle is not None:
+            return handle["kind"]
+
+        handle = self.focused_path_handle_at(canvas_x, canvas_y)
+        if handle is not None:
+            return handle["kind"]
+
+        return None
+
+    def hide_handle_tooltip(self):
+        self.handle_tooltip = None
+
+    def update_handle_tooltip(self, canvas_x, canvas_y):
+        if self.drag_action is not None or self.placement_command is not None:
+            self.hide_handle_tooltip()
+            return
+
+        kind = self.hovered_control_handle(canvas_x, canvas_y)
+        if kind is None:
+            self.hide_handle_tooltip()
+            return
+
+        tooltip = self.HANDLE_TOOLTIPS.get(kind)
+        if tooltip is None:
+            self.hide_handle_tooltip()
+            return
+
+        self.handle_tooltip = (tooltip, canvas_x, canvas_y)
 
     def canvas_mousemove(self, event):
         if self.drag_action == "pan" and self.drag_position is not None:
@@ -1914,12 +2218,14 @@ class ShapeCmd(Application):
 
         self.cursor_position = (event.x, event.y)
         self.move_placement_to_canvas(event.x, event.y)
+        self.update_handle_tooltip(event.x, event.y)
         self.redraw()
 
     def canvas_wheel(self, event):
         if not event.v_delta or self.view_origin is None:
             return
 
+        self.hide_handle_tooltip()
         world_x, world_y = self.canvas_to_world(event.x, event.y)
         zoom_factor = self.ZOOM_STEP ** (event.v_delta / 120)
         new_zoom = min(self.MAX_ZOOM, max(self.MIN_ZOOM, self.zoom * zoom_factor))
@@ -2110,6 +2416,7 @@ class ShapeCmd(Application):
         commands=None,
         remove_on_cancel=False,
     ):
+        self.hide_handle_tooltip()
         self.placement_command = command
         self.placement_commands = commands
         self.placement_remove_on_cancel = remove_on_cancel
