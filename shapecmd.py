@@ -209,7 +209,6 @@ class ShapeCmd(Application):
             ("y", 0),
             ("radius", DEFAULT_RADIUS),
             ("direction", "CCW"),
-            ("large_arc", False),
         ),
         "Turn": (("angle", 0), ("distance", 0)),
         "To": (("x", 0), ("y", 0)),
@@ -436,15 +435,6 @@ class ShapeCmd(Application):
                                                     if arg_name == "direction":
                                                         choices = ("CCW", "CW")
                                                         display_value = value
-                                                    elif arg_name == "large_arc":
-                                                        choices = {
-                                                            False: "Minor",
-                                                            True: "Major",
-                                                        }
-                                                        display_value = choices.get(
-                                                            value,
-                                                            value,
-                                                        )
                                                     else:
                                                         choices = None
                                                         display_value = value

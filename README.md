@@ -75,7 +75,7 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | `BezierTo` | `x, y` | Draws to the endpoint using cubic Bézier control points calculated from the previous heading. |
 | `ArcDegree` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
 | `ArcLength` | `angle, radius, arcLength, direction` | Draws an arc from the current point with its extent specified as a linear arc length. |
-| `ArcTo` | `x, y, radius, direction, largeArc` | Draws an arc to a fixed endpoint. `largeArc` is automatically set while dragging (`false` for ≤180°, `true` for >180°). The radius is clamped to at least half the distance from the start to the endpoint, and the corrected value is written back to the model. |
+| `ArcTo` | `x, y, radius, direction[, largeArc]` | Draws an arc to a fixed endpoint. The optional `largeArc` value is maintained automatically while dragging (`false` for ≤180°, `true` for >180°) and is not shown as an editable table field. The radius is clamped to at least half the distance from the start to the endpoint, and the corrected value is written back to the model. |
 | `ToShape` | `name` | Draws to the target shape's reference x/y coordinate. |
 | `ToShapeEdge` | `name` | Draws to the nearest point on the target shape's boundary. |
 
