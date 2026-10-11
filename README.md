@@ -118,6 +118,8 @@ segments.
 - `Add Shape`: add a shape initialized with a `Point`, then move it with the
   pointer until the next left click places it.
 - `Save`: choose an output path and save the JSON data.
+- `Export SVG`: export all shapes without canvas axes, focus handles, or
+  direction arrows. The SVG view box is fitted to the exported geometry.
 
 ## Focus Handles
 

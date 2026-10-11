@@ -2,6 +2,7 @@ import json
 import math
 import sys
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 from PUI.PySide6 import *
 
@@ -50,6 +51,8 @@ class ShapeCmd(Application):
     DEFAULT_RADIUS = 50
     DEFAULT_ARC_SPAN_DEGREES = 30
     DEFAULT_ARC_LENGTH = 50
+    SVG_PADDING = 10
+    SVG_POINT_RADIUS = 2
     DIRECT_POSITION_COMMANDS = {
         "Point",
         "Circle",
@@ -276,7 +279,11 @@ class ShapeCmd(Application):
                                     Divider()
                             Spacer()
                     Button("Add Shape").click(self.add_shape)
-                    Button("Save").click(self.save)
+                    with HBox():
+                        Button("Save").layout(weight=1).click(self.save)
+                        Button("Export SVG").layout(weight=1).click(
+                            self.export_svg
+                        )
 
     def update_canvas_size(self, width, height):
         new_size = (width, height)
@@ -1878,6 +1885,132 @@ class ShapeCmd(Application):
             json.dumps(data, indent=4, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+
+    @staticmethod
+    def svg_number(value):
+        value = round(float(value), 2)
+        if value == 0:
+            value = 0
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    def svg_path(self, points, closed, color):
+        if not points:
+            return None
+        if len(points) == 1:
+            point_x, point_y = points[0]
+            return (
+                f'<circle cx="{self.svg_number(point_x)}" '
+                f'cy="{self.svg_number(point_y)}" '
+                f'r="{self.svg_number(self.SVG_POINT_RADIUS)}" '
+                f'fill="{color}" />'
+            )
+
+        path_points = list(points)
+        if closed and path_points[-1] == path_points[0]:
+            path_points.pop()
+        coordinates = " ".join(
+            (
+                f"M {self.svg_number(point_x)} {self.svg_number(point_y)}"
+                if index == 0
+                else f"L {self.svg_number(point_x)} {self.svg_number(point_y)}"
+            )
+            for index, (point_x, point_y) in enumerate(path_points)
+        )
+        close_command = " Z" if closed else ""
+        return (
+            f'<path d="{coordinates}{close_command}" fill="none" '
+            f'stroke="{color}" stroke-width="1" '
+            f'vector-effect="non-scaling-stroke" />'
+        )
+
+    def svg_document(self):
+        bounds = self.drawable_bounds()
+        if bounds is None:
+            min_x, min_y, max_x, max_y = 0, 0, 100, 100
+            padding = 0
+        else:
+            min_x, min_y, max_x, max_y = bounds
+            padding = self.SVG_PADDING
+
+        view_x = min_x - padding
+        view_y = -(max_y + padding)
+        width = max(1, max_x - min_x + 2 * padding)
+        height = max(1, max_y - min_y + 2 * padding)
+        elements = []
+
+        for shape_index, shape in enumerate(self.state.shapes):
+            commands = shape["commands"]
+            if not commands:
+                continue
+            command = commands[0]
+            command_name = command[0]
+            element = None
+
+            if command_name == "Circle":
+                geometry = self.circle_geometry(command)
+                if geometry is not None:
+                    center_x, center_y, radius = geometry
+                    element = (
+                        f'<circle cx="{self.svg_number(center_x)}" '
+                        f'cy="{self.svg_number(center_y)}" '
+                        f'r="{self.svg_number(radius)}" fill="none" '
+                        f'stroke="#2563EB" stroke-width="1" '
+                        f'vector-effect="non-scaling-stroke" />'
+                    )
+            elif command_name in ("Path", "ClosedPath"):
+                geometry = self.path_geometry(
+                    commands,
+                    closed=command_name == "ClosedPath",
+                )
+                element = self.svg_path(
+                    geometry["points"],
+                    command_name == "ClosedPath",
+                    "#0F766E",
+                )
+            else:
+                geometry = self.standalone_geometry(command)
+                if geometry is not None:
+                    element = self.svg_path(
+                        geometry["points"],
+                        geometry["closed"],
+                        "#2563EB",
+                    )
+
+            if element is None:
+                continue
+            name = str(shape.get("name", ""))
+            name_attribute = f" data-name={quoteattr(name)}" if name else ""
+            elements.append(
+                f'    <g id="shape-{shape_index}"{name_attribute}>\n'
+                f"        {element}\n"
+                "    </g>"
+            )
+
+        body = "\n".join(elements)
+        if body:
+            body += "\n"
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            f'width="{self.svg_number(width)}" '
+            f'height="{self.svg_number(height)}" '
+            f'viewBox="{self.svg_number(view_x)} {self.svg_number(view_y)} '
+            f'{self.svg_number(width)} {self.svg_number(height)}">\n'
+            '  <g transform="scale(1,-1)">\n'
+            f"{body}"
+            "  </g>\n"
+            "</svg>\n"
+        )
+
+    def export_svg(self, event):
+        output_path = SaveFile(
+            default=str(self.input_path.with_suffix(".svg")),
+            title="Export ShapeCmd SVG",
+            types="SVG Files (*.svg)|All Files (*)",
+        )
+        if output_path is None:
+            return
+        Path(output_path).write_text(self.svg_document(), encoding="utf-8")
 
 
 if __name__ == "__main__":
