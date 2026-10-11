@@ -202,6 +202,7 @@ class ShapeCmd(Application):
         self.drag_offset = None
         self.placement_command = None
         self.placement_commands = None
+        self.placement_remove_on_cancel = False
         self.cursor_position = None
 
     @staticmethod
@@ -235,7 +236,9 @@ class ShapeCmd(Application):
         return "".join(part.capitalize() for part in value.split("_"))
 
     def content(self):
-        with Window(title="ShapeCmd", maximize=True):
+        with Window(title="ShapeCmd", maximize=True).keypress(
+            self.window_keypress
+        ):
             with HBox():
                 with VBox().layout(weight=1):
                     with HBox():
@@ -1617,6 +1620,15 @@ class ShapeCmd(Application):
                 color=0x555555,
             )
 
+        if self.placement_command is not None:
+            canvas.drawText(
+                max(12, canvas.width / 2 - 48),
+                12,
+                "Esc to cancel",
+                size=11,
+                color=0x555555,
+            )
+
     def canvas_mouseenter(self, event):
         self.cursor_position = (event.x, event.y)
         self.move_placement_to_canvas(event.x, event.y)
@@ -1639,10 +1651,15 @@ class ShapeCmd(Application):
             return
 
         if event.button == MouseButton.LEFT and self.placement_command is not None:
+            command = self.placement_command
+            commands = self.placement_commands
             self.move_placement_to_canvas(event.x, event.y)
-            self.placement_command = None
-            self.placement_commands = None
-            self.redraw()
+            self.clear_placement()
+            next_values = self.next_placement_values(command, commands)
+            if next_values is not None:
+                self.append_placement_command(commands, next_values)
+            else:
+                self.redraw()
             return
 
         if event.button == MouseButton.LEFT:
@@ -1951,9 +1968,15 @@ class ShapeCmd(Application):
                 world_y - handle_y,
             )
 
-    def begin_placement(self, command, commands=None):
+    def begin_placement(
+        self,
+        command,
+        commands=None,
+        remove_on_cancel=False,
+    ):
         self.placement_command = command
         self.placement_commands = commands
+        self.placement_remove_on_cancel = remove_on_cancel
         self.drag_action = None
         self.drag_target = None
         self.drag_position = None
@@ -1962,18 +1985,60 @@ class ShapeCmd(Application):
             self.move_placement_to_canvas(*self.cursor_position)
         self.redraw()
 
+    def clear_placement(self):
+        self.placement_command = None
+        self.placement_commands = None
+        self.placement_remove_on_cancel = False
+
+    @staticmethod
+    def next_placement_values(command, commands):
+        if (
+            commands is None
+            or not commands
+            or commands[-1] is not command
+            or commands[0][0] not in ("Path", "ClosedPath")
+        ):
+            return None
+        if command is commands[0]:
+            return ["To", command[1], command[2]]
+        return list(command)
+
+    def append_placement_command(self, commands, values):
+        command = State(values, deep=True)
+        commands.append(command)
+        self.focused_command = None
+        self.focused_path_commands = commands
+        self.begin_placement(
+            command,
+            commands,
+            remove_on_cancel=True,
+        )
+
+    def window_keypress(self, event):
+        if event.text != "\x1b" or self.placement_command is None:
+            return
+
+        command = self.placement_command
+        commands = self.placement_commands
+        remove_command = self.placement_remove_on_cancel
+        self.clear_placement()
+        if (
+            remove_command
+            and commands is not None
+            and len(commands) > 1
+            and commands[-1] is command
+        ):
+            commands.pop()
+        self.redraw()
+
     def add_next(self, event, shape):
         commands = shape["commands"]
         geometry = self.path_geometry(commands, closed=False)
         initial_x, initial_y = geometry["points"][-1] if geometry["points"] else (0, 0)
-        command = State(
+        self.append_placement_command(
+            commands,
             ["To", round(initial_x, 2), round(initial_y, 2)],
-            deep=True,
         )
-        commands.append(command)
-        self.focused_command = None
-        self.focused_path_commands = commands
-        self.begin_placement(command, commands)
 
     def command_changed(self, event, command, shape):
         parameters = self.COMMAND_PARAMETERS.get(command[0])

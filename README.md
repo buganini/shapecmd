@@ -115,8 +115,10 @@ segments.
 - Changing a command type re-enters placement mode. Direct-position commands
   follow the pointer, `Turn` places its endpoint, and path arcs place their
   center.
-- `Add Next`: append a `To` command and move it with the pointer until the next
-  left click places it.
+- Path placement is continuous. Placing a `Path` or `ClosedPath` start point
+  creates a pending `To`; placing a next command creates another command of the
+  same type. Press Escape to stop placement and remove the pending command.
+- `Add Next`: append a pending `To` command and enter continuous placement.
 - `Add Shape`: add a shape initialized with a `Point`, then move it with the
   pointer until the next left click places it.
 - `Save`: choose an output path and save the JSON data.
