@@ -469,7 +469,13 @@ class ShapeCmd(Application):
                                             command_choices = (
                                                 self.START_COMMANDS
                                                 if cmd_idx == 0
-                                                else self.NEXT_COMMANDS
+                                                else tuple(
+                                                    choice
+                                                    for choice in self.NEXT_COMMANDS
+                                                    if choice != "Fillet"
+                                                    or commands[cmd_idx - 1][0]
+                                                    != "Fillet"
+                                                )
                                             )
                                             with TableNode():
                                                 TableNode(
