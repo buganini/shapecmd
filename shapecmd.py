@@ -72,6 +72,7 @@ class ShapeCmd(Application):
         "Arc": (
             ("center_x", 0),
             ("center_y", 0),
+            ("radius", 0),
             ("start_angle", 0),
             ("span_deg", 0),
             ("direction", "CCW"),
@@ -278,6 +279,14 @@ class ShapeCmd(Application):
                     commands,
                     closed=command[0] == "ClosedPath",
                 )
+            elif command[0] in (
+                "Point",
+                "Arc",
+                "Rect",
+                "CenterRect",
+                "RegularPolygon",
+            ):
+                self.draw_standalone_shape(canvas, command)
 
     @staticmethod
     def circle_geometry(command):
@@ -333,6 +342,214 @@ class ShapeCmd(Application):
                 self.HANDLE_RADIUS,
                 self.HANDLE_RADIUS,
                 fill=0xFFFFFF,
+                stroke=0xF59E0B,
+                width=2,
+            )
+
+    def standalone_geometry(self, command):
+        try:
+            command_name = command[0]
+            if command_name == "Point" and len(command) >= 3:
+                point = (float(command[1]), float(command[2]))
+                return {
+                    "points": [point],
+                    "handles": [{"kind": "point", "point": point}],
+                    "guides": [],
+                    "closed": False,
+                }
+
+            if command_name == "Arc" and len(command) >= 6:
+                center = (float(command[1]), float(command[2]))
+                radius = abs(float(command[3]))
+                start_angle = math.radians(float(command[4]))
+                span = float(command[5])
+                direction = (
+                    str(command[6]).upper()
+                    if len(command) >= 7
+                    else ("CW" if span < 0 else "CCW")
+                )
+                if direction not in ("CW", "CCW"):
+                    direction = "CCW"
+                span = math.radians(abs(span)) * (-1 if direction == "CW" else 1)
+                segment_count = (
+                    min(
+                        720,
+                        max(
+                            1,
+                            math.ceil(
+                                abs(math.degrees(span))
+                                / self.ARC_SEGMENT_DEGREES
+                            ),
+                        ),
+                    )
+                    if radius and span
+                    else 0
+                )
+                points = []
+                for index in range(segment_count + 1):
+                    angle = (
+                        start_angle + span * index / segment_count
+                        if segment_count
+                        else start_angle
+                    )
+                    points.append(
+                        (
+                            center[0] + math.cos(angle) * radius,
+                            center[1] + math.sin(angle) * radius,
+                        )
+                    )
+                start = points[0]
+                end = points[-1]
+                radius_handle = (
+                    center[0] + math.cos(start_angle) * radius / 2,
+                    center[1] + math.sin(start_angle) * radius / 2,
+                )
+                return {
+                    "points": points,
+                    "handles": [
+                        {"kind": "shape_center", "point": center},
+                        {
+                            "kind": "shape_radius",
+                            "point": radius_handle,
+                            "center": center,
+                            "angle": start_angle,
+                        },
+                        {
+                            "kind": "arc_start",
+                            "point": start,
+                            "center": center,
+                        },
+                        {
+                            "kind": "shape_arc_end",
+                            "point": end,
+                            "center": center,
+                            "start_angle": start_angle,
+                        },
+                    ],
+                    "guides": [(center, start), (center, end)],
+                    "closed": False,
+                }
+
+            if command_name == "Rect" and len(command) >= 5:
+                origin = (float(command[1]), float(command[2]))
+                corner = (
+                    origin[0] + float(command[3]),
+                    origin[1] + float(command[4]),
+                )
+                points = [
+                    origin,
+                    (corner[0], origin[1]),
+                    corner,
+                    (origin[0], corner[1]),
+                    origin,
+                ]
+                return {
+                    "points": points,
+                    "handles": [
+                        {"kind": "rect_origin", "point": origin},
+                        {
+                            "kind": "rect_corner",
+                            "point": corner,
+                            "origin": origin,
+                        },
+                    ],
+                    "guides": [],
+                    "closed": True,
+                }
+
+            if command_name == "CenterRect" and len(command) >= 5:
+                center = (float(command[1]), float(command[2]))
+                half_width = abs(float(command[3])) / 2
+                half_height = abs(float(command[4])) / 2
+                corner = (center[0] + half_width, center[1] + half_height)
+                points = [
+                    (center[0] - half_width, center[1] - half_height),
+                    (center[0] + half_width, center[1] - half_height),
+                    corner,
+                    (center[0] - half_width, center[1] + half_height),
+                ]
+                points.append(points[0])
+                return {
+                    "points": points,
+                    "handles": [
+                        {"kind": "shape_center", "point": center},
+                        {
+                            "kind": "center_rect_corner",
+                            "point": corner,
+                            "center": center,
+                        },
+                    ],
+                    "guides": [(center, corner)],
+                    "closed": True,
+                }
+
+            if command_name == "RegularPolygon" and len(command) >= 6:
+                center = (float(command[1]), float(command[2]))
+                radius = abs(float(command[3]))
+                sides = max(3, min(1000, int(command[4])))
+                rotation = math.radians(float(command[5]))
+                points = [
+                    (
+                        center[0]
+                        + math.cos(rotation + 2 * math.pi * index / sides) * radius,
+                        center[1]
+                        + math.sin(rotation + 2 * math.pi * index / sides) * radius,
+                    )
+                    for index in range(sides)
+                ]
+                points.append(points[0])
+                return {
+                    "points": points,
+                    "handles": [
+                        {"kind": "shape_center", "point": center},
+                        {
+                            "kind": "polygon_vertex",
+                            "point": points[0],
+                            "center": center,
+                        },
+                    ],
+                    "guides": [(center, points[0])],
+                    "closed": True,
+                }
+        except (IndexError, TypeError, ValueError):
+            return None
+        return None
+
+    def draw_standalone_shape(self, canvas, command):
+        geometry = self.standalone_geometry(command)
+        if geometry is None:
+            return
+
+        canvas_points = [self.world_to_canvas(*point) for point in geometry["points"]]
+        focused = command is self.focused_command
+        color = 0xF59E0B if focused else 0x2563EB
+        if len(canvas_points) == 1:
+            canvas.drawEllipse(*canvas_points[0], 3, 3, fill=color)
+        elif len(canvas_points) > 1:
+            canvas.drawPolyline(canvas_points, color=color, width=2)
+
+        if not focused:
+            return
+
+        for start, end in geometry["guides"]:
+            canvas.drawLine(
+                *self.world_to_canvas(*start),
+                *self.world_to_canvas(*end),
+                color=0xFBBF24,
+            )
+        for handle in geometry["handles"]:
+            point_x, point_y = self.world_to_canvas(*handle["point"])
+            canvas.drawEllipse(
+                point_x,
+                point_y,
+                self.HANDLE_RADIUS,
+                self.HANDLE_RADIUS,
+                fill=(
+                    0xF59E0B
+                    if handle["kind"]
+                    in ("point", "shape_center", "rect_origin")
+                    else 0xFFFFFF
+                ),
                 stroke=0xF59E0B,
                 width=2,
             )
@@ -427,6 +644,10 @@ class ShapeCmd(Application):
                 closed=command[0] == "ClosedPath",
                 resolving=resolving,
             )
+            return self.closest_point_on_polyline(point, geometry["points"])
+
+        geometry = self.standalone_geometry(command)
+        if geometry is not None:
             return self.closest_point_on_polyline(point, geometry["points"])
 
         return None
@@ -774,7 +995,7 @@ class ShapeCmd(Application):
                 yield commands[0]
 
     def focused_handle_at(self, canvas_x, canvas_y):
-        if self.focused_command is None:
+        if self.focused_command is None or self.focused_command[0] != "Circle":
             return None
 
         geometry = self.circle_geometry(self.focused_command)
@@ -815,6 +1036,142 @@ class ShapeCmd(Application):
             ):
                 return command
         return None
+
+    def standalone_commands(self):
+        command_names = {"Point", "Arc", "Rect", "CenterRect", "RegularPolygon"}
+        for shape in self.state.shapes:
+            commands = shape["commands"]
+            if commands and commands[0][0] in command_names:
+                yield commands[0]
+
+    @staticmethod
+    def point_in_polygon(point, polygon):
+        point_x, point_y = point
+        inside = False
+        for start, end in zip(polygon, polygon[1:]):
+            if (start[1] > point_y) == (end[1] > point_y):
+                continue
+            crossing_x = (
+                (end[0] - start[0])
+                * (point_y - start[1])
+                / (end[1] - start[1])
+                + start[0]
+            )
+            if point_x < crossing_x:
+                inside = not inside
+        return inside
+
+    def standalone_at(self, canvas_x, canvas_y):
+        for command in reversed(list(self.standalone_commands())):
+            geometry = self.standalone_geometry(command)
+            if geometry is None:
+                continue
+            points = [self.world_to_canvas(*point) for point in geometry["points"]]
+            if len(points) == 1:
+                if (
+                    math.hypot(canvas_x - points[0][0], canvas_y - points[0][1])
+                    <= self.HANDLE_HIT_RADIUS
+                ):
+                    return command
+                continue
+            if geometry["closed"] and self.point_in_polygon(
+                (canvas_x, canvas_y), points
+            ):
+                return command
+            for start, end in zip(points, points[1:]):
+                if (
+                    self.point_segment_distance((canvas_x, canvas_y), start, end)
+                    <= self.SHAPE_HIT_MARGIN
+                ):
+                    return command
+        return None
+
+    def focused_standalone_handle_at(self, canvas_x, canvas_y):
+        if self.focused_command is None or self.focused_command[0] == "Circle":
+            return None
+        geometry = self.standalone_geometry(self.focused_command)
+        if geometry is None:
+            return None
+        for handle in reversed(geometry["handles"]):
+            handle_x, handle_y = self.world_to_canvas(*handle["point"])
+            if (
+                math.hypot(canvas_x - handle_x, canvas_y - handle_y)
+                <= self.HANDLE_HIT_RADIUS
+            ):
+                return handle
+        return None
+
+    def current_standalone_handle(self):
+        if self.focused_command is None or self.drag_target is None:
+            return None
+        geometry = self.standalone_geometry(self.focused_command)
+        if geometry is None:
+            return None
+        for handle in geometry["handles"]:
+            if handle["kind"] == self.drag_target:
+                return handle
+        return None
+
+    def drag_standalone_handle(self, world_x, world_y):
+        handle = self.current_standalone_handle()
+        if handle is None:
+            return
+        command = self.focused_command
+        target_x = world_x + self.drag_offset[0]
+        target_y = world_y + self.drag_offset[1]
+        kind = handle["kind"]
+
+        with command:
+            if kind == "point":
+                command[1] = round(target_x, 2)
+                command[2] = round(target_y, 2)
+            elif kind == "shape_center":
+                command[1] = round(target_x, 2)
+                command[2] = round(target_y, 2)
+            elif kind == "arc_start":
+                center_x, center_y = handle["center"]
+                delta_x = target_x - center_x
+                delta_y = target_y - center_y
+                command[3] = round(math.hypot(delta_x, delta_y), 2)
+                command[4] = round(math.degrees(math.atan2(delta_y, delta_x)), 2)
+            elif kind == "shape_radius":
+                center_x, center_y = handle["center"]
+                direction_x = math.cos(handle["angle"])
+                direction_y = math.sin(handle["angle"])
+                projected_half_radius = (
+                    (target_x - center_x) * direction_x
+                    + (target_y - center_y) * direction_y
+                )
+                command[3] = round(max(0, projected_half_radius * 2), 2)
+            elif kind == "shape_arc_end":
+                center_x, center_y = handle["center"]
+                end_angle = math.atan2(target_y - center_y, target_x - center_x)
+                span = self.signed_angle_delta(end_angle - handle["start_angle"])
+                direction = (
+                    str(command[6]).upper() if len(command) >= 7 else "CCW"
+                )
+                if direction == "CCW" and span < 0:
+                    span += 2 * math.pi
+                elif direction == "CW" and span > 0:
+                    span -= 2 * math.pi
+                command[5] = round(math.degrees(abs(span)), 2)
+            elif kind == "rect_origin":
+                command[1] = round(target_x, 2)
+                command[2] = round(target_y, 2)
+            elif kind == "rect_corner":
+                origin_x, origin_y = handle["origin"]
+                command[3] = round(target_x - origin_x, 2)
+                command[4] = round(target_y - origin_y, 2)
+            elif kind == "center_rect_corner":
+                center_x, center_y = handle["center"]
+                command[3] = round(abs(target_x - center_x) * 2, 2)
+                command[4] = round(abs(target_y - center_y) * 2, 2)
+            elif kind == "polygon_vertex":
+                center_x, center_y = handle["center"]
+                delta_x = target_x - center_x
+                delta_y = target_y - center_y
+                command[3] = round(math.hypot(delta_x, delta_y), 2)
+                command[5] = round(math.degrees(math.atan2(delta_y, delta_x)), 2)
 
     def path_command_lists(self):
         for shape in self.state.shapes:
@@ -1038,6 +1395,15 @@ class ShapeCmd(Application):
                     self.drag_offset = radius - (world_x - center_x)
                 return
 
+            shape_handle = self.focused_standalone_handle_at(event.x, event.y)
+            if shape_handle is not None:
+                world_x, world_y = self.canvas_to_world(event.x, event.y)
+                handle_x, handle_y = shape_handle["point"]
+                self.drag_action = "shape_handle"
+                self.drag_target = shape_handle["kind"]
+                self.drag_offset = (handle_x - world_x, handle_y - world_y)
+                return
+
             path_handle = self.focused_path_handle_at(event.x, event.y)
             if path_handle is not None:
                 world_x, world_y = self.canvas_to_world(event.x, event.y)
@@ -1054,6 +1420,16 @@ class ShapeCmd(Application):
             if path_commands is not None:
                 self.focused_path_commands = path_commands
                 self.focused_command = None
+                self.drag_action = None
+                self.drag_target = None
+                self.drag_position = None
+                self.redraw()
+                return
+
+            command = self.standalone_at(event.x, event.y)
+            if command is not None:
+                self.focused_command = command
+                self.focused_path_commands = None
                 self.drag_action = None
                 self.drag_target = None
                 self.drag_position = None
@@ -1115,6 +1491,9 @@ class ShapeCmd(Application):
         elif self.drag_action == "path_handle":
             world_x, world_y = self.canvas_to_world(event.x, event.y)
             self.drag_path_handle(world_x, world_y)
+        elif self.drag_action == "shape_handle":
+            world_x, world_y = self.canvas_to_world(event.x, event.y)
+            self.drag_standalone_handle(world_x, world_y)
 
         self.cursor_position = (event.x, event.y)
         self.redraw()
@@ -1161,6 +1540,19 @@ class ShapeCmd(Application):
                 if points:
                     x_values = [point[0] for point in points]
                     y_values = [point[1] for point in points]
+                    bounds.append(
+                        (
+                            min(x_values),
+                            min(y_values),
+                            max(x_values),
+                            max(y_values),
+                        )
+                    )
+            else:
+                geometry = self.standalone_geometry(command)
+                if geometry is not None and geometry["points"]:
+                    x_values = [point[0] for point in geometry["points"]]
+                    y_values = [point[1] for point in geometry["points"]]
                     bounds.append(
                         (
                             min(x_values),
@@ -1216,7 +1608,7 @@ class ShapeCmd(Application):
         shape["commands"].append(State(["To", 0, 0], deep=True))
 
     def command_changed(self, event, command):
-        if command is self.focused_command and command[0] != "Circle":
+        if command is self.focused_command and command[0] in ("Path", "ClosedPath"):
             self.focused_command = None
         if (
             self.focused_path_commands is not None

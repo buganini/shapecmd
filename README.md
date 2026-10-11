@@ -1,7 +1,7 @@
 # Shape或Path起點
 - Point: x, y
 - Circle:  center_x, center_y, radius
-- Arc: center_x, center_y, start_angle, span_deg, direction (CW/CCW)
+- Arc: center_x, center_y, radius, start_angle, span_deg, direction (CW/CCW)
 - Rect: x, y, x_offset, y_offset
 - CenterRect: center_x, center_y, width, height
 - RegularPolygon: center_x, center_y, radius, sides, rotate_deg
@@ -15,4 +15,4 @@
 - Turn: angle, distance
 - To: x, y
 - BezierTo: x, y (終點；控制點依前一段方向自動計算)
-- ToShape: name（連到該 Point、Circle、Path 或 ClosedPath 上的最近點）
+- ToShape: name（連到任一支援 shape 上的最近點）
