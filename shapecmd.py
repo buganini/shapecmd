@@ -335,7 +335,99 @@ class ShapeCmd(Application):
                 return direction
         return "CW" if span < 0 else "CCW"
 
-    def path_geometry(self, commands, closed=False):
+    @staticmethod
+    def closest_point_on_polyline(point, points):
+        if not points:
+            return None
+        if len(points) == 1:
+            return points[0]
+
+        point_x, point_y = point
+        closest = None
+        closest_distance_squared = math.inf
+        for start, end in zip(points, points[1:]):
+            delta_x = end[0] - start[0]
+            delta_y = end[1] - start[1]
+            length_squared = delta_x**2 + delta_y**2
+            if length_squared:
+                projection = (
+                    (point_x - start[0]) * delta_x
+                    + (point_y - start[1]) * delta_y
+                ) / length_squared
+                projection = min(1.0, max(0.0, projection))
+                candidate = (
+                    start[0] + projection * delta_x,
+                    start[1] + projection * delta_y,
+                )
+            else:
+                candidate = start
+
+            distance_squared = (
+                (point_x - candidate[0]) ** 2 + (point_y - candidate[1]) ** 2
+            )
+            if distance_squared < closest_distance_squared:
+                closest = candidate
+                closest_distance_squared = distance_squared
+
+        return closest
+
+    def closest_point_on_named_shape(self, point, name, resolving):
+        name = str(name)
+        if not name:
+            return None
+
+        target_shape = next(
+            (
+                shape
+                for shape in self.state.shapes
+                if str(shape.get("name", "")) == name
+            ),
+            None,
+        )
+        if target_shape is None or not target_shape["commands"]:
+            return None
+
+        commands = target_shape["commands"]
+        command = commands[0]
+        if not command:
+            return None
+
+        if command[0] == "Point" and len(command) >= 3:
+            try:
+                return float(command[1]), float(command[2])
+            except (TypeError, ValueError):
+                return None
+
+        if command[0] == "Circle":
+            geometry = self.circle_geometry(command)
+            if geometry is None:
+                return None
+            center_x, center_y, radius = geometry
+            delta_x = point[0] - center_x
+            delta_y = point[1] - center_y
+            distance = math.hypot(delta_x, delta_y)
+            if not distance:
+                return center_x + radius, center_y
+            scale = radius / distance
+            return center_x + delta_x * scale, center_y + delta_y * scale
+
+        if command[0] in ("Path", "ClosedPath"):
+            geometry = self.path_geometry(
+                commands,
+                closed=command[0] == "ClosedPath",
+                resolving=resolving,
+            )
+            return self.closest_point_on_polyline(point, geometry["points"])
+
+        return None
+
+    def path_geometry(self, commands, closed=False, resolving=None):
+        resolving = set() if resolving is None else set(resolving)
+        commands_identity = id(commands)
+        if commands_identity in resolving:
+            return {"points": [], "handles": []}
+        resolving.add(commands_identity)
+
         try:
             current_x = float(commands[0][1])
             current_y = float(commands[0][2])
@@ -424,6 +516,30 @@ class ShapeCmd(Application):
                     handles.append(
                         {
                             "kind": "bezier_to",
+                            "command": command,
+                            "point": (current_x, current_y),
+                        }
+                    )
+
+                elif command_name == "ToShape" and len(command) >= 2:
+                    next_point = self.closest_point_on_named_shape(
+                        (current_x, current_y),
+                        command[1],
+                        resolving,
+                    )
+                    if next_point is None:
+                        continue
+
+                    next_x, next_y = next_point
+                    delta_x = next_x - current_x
+                    delta_y = next_y - current_y
+                    if delta_x or delta_y:
+                        heading = math.atan2(delta_y, delta_x)
+                    current_x, current_y = next_x, next_y
+                    points.append((current_x, current_y))
+                    handles.append(
+                        {
+                            "kind": "to_shape",
                             "command": command,
                             "point": (current_x, current_y),
                         }
@@ -739,6 +855,8 @@ class ShapeCmd(Application):
         closed = self.focused_path_commands[0][0] == "ClosedPath"
         geometry = self.path_geometry(self.focused_path_commands, closed=closed)
         for handle in reversed(geometry["handles"]):
+            if handle["kind"] == "to_shape":
+                continue
             handle_x, handle_y = self.world_to_canvas(*handle["point"])
             if (
                 math.hypot(canvas_x - handle_x, canvas_y - handle_y)

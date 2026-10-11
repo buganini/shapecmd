@@ -15,4 +15,4 @@
 - Turn: angle, distance
 - To: x, y
 - BezierTo: x, y (終點；控制點依前一段方向自動計算)
-- ToShape: name
+- ToShape: name（連到該 Point、Circle、Path 或 ClosedPath 上的最近點）
