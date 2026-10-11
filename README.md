@@ -92,9 +92,37 @@ its center from the start, fixed endpoint, radius, direction, and `largeArc`;
 the minimum radius produces a semicircle.
 
 Radius parameters and `arcLength` default to `50`. Degree-based arc spans
-default to `30`. `Fillet` is an endpoint modifier rather than an endpoint of
-its own, so it has no endpoint index. It also composes with `ToShape` and
-`ToShapeEdge` when either command supplies the preceding endpoint.
+default to `30`.
+
+## Fillet Modifier
+
+`Fillet` is a modifier, not an endpoint command. It does not advance the path
+or create an endpoint of its own. Instead, it rounds the endpoint immediately
+before it by trimming that endpoint's incoming and outgoing straight segments:
+
+```json
+[
+    ["Path", 0, 0],
+    ["To", 100, 0],
+    ["Fillet", 20],
+    ["To", 100, 100]
+]
+```
+
+In this example, `(100, 0)` remains the logical endpoint and control point, but
+the rendered path passes around it along a radius-`20` tangent arc. The
+`Fillet` row has no endpoint index, and subsequent endpoint indexes do not
+include it.
+
+A `Fillet` must immediately follow the endpoint it modifies and requires valid
+straight segments on both sides. Consecutive `Fillet` modifiers are invalid,
+so the command selector omits `Fillet` when the preceding row is already one.
+`ToShape` and `ToShapeEdge` can supply the modified endpoint directly; separate
+`FilletToShape` variants are unnecessary.
+
+The radius defaults to `50`. If it would place a tangent point beyond either
+adjacent segment, it is clamped and the corrected value is written back to the
+model. Fillets at both ends of the same segment share its available length.
 
 The reference x/y coordinate used by `*ToShape` commands depends on the target
 shape:
