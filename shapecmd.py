@@ -125,7 +125,7 @@ class ShapeCmd(Application):
         "bezier_to": "Bezier endpoint",
         "to_shape": "Target shape position",
         "to_shape_edge": "Nearest point on target shape",
-        "turn": "Turn angle and distance",
+        "polar_to": "PolarTo angle and distance",
         "arc_center": "Arc center and radius",
         "arc_radius": "Arc radius",
         "arc_end": "Arc endpoint",
@@ -148,7 +148,7 @@ class ShapeCmd(Application):
         "ArcDegree",
         "ArcLength",
         "ArcTo",
-        "Turn",
+        "PolarTo",
         "To",
         "BezierTo",
         "ToShape",
@@ -210,7 +210,7 @@ class ShapeCmd(Application):
             ("radius", DEFAULT_RADIUS),
             ("direction", "CCW"),
         ),
-        "Turn": (("angle", 0), ("distance", 0)),
+        "PolarTo": (("angle", 0), ("distance", 0)),
         "To": (("x", 0), ("y", 0)),
         "BezierTo": (("x", 0), ("y", 0)),
         "ToShape": (("name", ""),),
@@ -1142,7 +1142,7 @@ class ShapeCmd(Application):
                         }
                     )
 
-                elif command_name == "Turn" and len(command) >= 3:
+                elif command_name == "PolarTo" and len(command) >= 3:
                     origin = (current_x, current_y)
                     heading_before = heading
                     heading += math.radians(float(command[1]))
@@ -1152,7 +1152,7 @@ class ShapeCmd(Application):
                     points.append((current_x, current_y))
                     handles.append(
                         {
-                            "kind": "turn",
+                            "kind": "polar_to",
                             "command": command,
                             "point": (current_x, current_y),
                             "origin": origin,
@@ -1362,7 +1362,7 @@ class ShapeCmd(Application):
                         "bezier_to",
                         "to_shape",
                         "to_shape_edge",
-                        "turn",
+                        "polar_to",
                         "arc_to",
                         "arc_end",
                     }
@@ -1851,7 +1851,7 @@ class ShapeCmd(Application):
                 self.normalize_command(command, self.focused_path_commands)
             return
 
-        if kind == "turn":
+        if kind == "polar_to":
             origin_x, origin_y = handle["origin"]
             delta_x = target_x - origin_x
             delta_y = target_y - origin_y
@@ -1974,7 +1974,7 @@ class ShapeCmd(Application):
             self.drag_position = (world_x, world_y)
         elif kind in ("path_start", "to", "bezier_to", "arc_to"):
             self.move_path_endpoint_to(handle, target_x, target_y)
-        elif kind == "turn":
+        elif kind == "polar_to":
             origin_x, origin_y = handle["origin"]
             delta_x = target_x - origin_x
             delta_y = target_y - origin_y
@@ -2499,9 +2499,9 @@ class ShapeCmd(Application):
             if handle["command"] is command
         ]
 
-        if command_name == "Turn":
+        if command_name == "PolarTo":
             handle = next(
-                (handle for handle in handles if handle["kind"] == "turn"),
+                (handle for handle in handles if handle["kind"] == "polar_to"),
                 None,
             )
             if handle is None:

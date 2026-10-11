@@ -71,7 +71,7 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | Command | Arguments | Description |
 | --- | --- | --- |
 | `To` | `x, y` | Draws to an absolute coordinate. |
-| `Turn` | `angle, distance` | Turns relative to the current heading, then advances by the specified distance. |
+| `PolarTo` | `angle, distance` | Turns relative to the current heading, then advances by the specified distance. |
 | `BezierTo` | `x, y` | Draws to the endpoint using cubic Bézier control points calculated from the previous heading. |
 | `ArcDegree` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
 | `ArcLength` | `angle, radius, arcLength, direction` | Draws an arc from the current point with its extent specified as a linear arc length. |
@@ -119,7 +119,7 @@ segments.
   endpoint indexes begin at `1`. Command and Direction cells use drop-down
   editors.
 - Changing a command type re-enters placement mode. Direct-position commands
-  follow the pointer, `Turn` places its endpoint, and path arcs place their
+  follow the pointer, `PolarTo` places its endpoint, and path arcs place their
   center.
 - Path placement is continuous. Placing a `Path` or `ClosedPath` start point
   creates a pending `To`; placing a next command creates another command of the
