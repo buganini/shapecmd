@@ -6,7 +6,7 @@ from xml.sax.saxutils import quoteattr
 
 import PUI
 
-MINIMUM_PUI_VERSION = (0, 49)
+MINIMUM_PUI_VERSION = (0, 50)
 installed_pui_version = tuple(int(part) for part in PUI.__version__.split("."))
 if installed_pui_version < MINIMUM_PUI_VERSION:
     required_version = ".".join(str(part) for part in MINIMUM_PUI_VERSION)
@@ -261,7 +261,7 @@ class ShapeCmd(Application):
                         .wheel(self.canvas_wheel)
                     )
 
-                with VBox().layout(width=600):
+                with VBox().layout(width=700):
                     with Scroll():
                         with VBox():
                             for shape_idx, shape in enumerate(self.state.shapes):
