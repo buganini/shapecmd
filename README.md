@@ -44,9 +44,9 @@ order.
 ```
 
 The positive X axis points right and the positive Y axis points up. Angles use
-degrees except in `ArcRad`. Floating-point values are rounded to two decimal
-places after loading, field editing, or dragging. Expansion state in the right
-panel is UI-only and is not written to JSON.
+degrees. Floating-point values are rounded to two decimal places after loading,
+field editing, or dragging. Expansion state in the right panel is UI-only and
+is not written to JSON.
 
 ## Initial Commands
 
@@ -74,16 +74,17 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | `Turn` | `angle, distance` | Turns relative to the current heading, then advances by the specified distance. |
 | `BezierTo` | `x, y` | Draws to the endpoint using cubic Bézier control points calculated from the previous heading. |
 | `ArcDeg` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
-| `ArcRad` | `angle, radius, spanRadian, direction` | Draws an arc from the current point. The angle and span use radians. |
+| `ArcLength` | `angle, radius, arcLength, direction` | Draws an arc from the current point with its extent specified as a linear arc length. |
 | `ToShape` | `name` | Draws to the target shape's reference x/y coordinate. |
 | `ToShapeEdge` | `name` | Draws to the nearest point on the target shape's boundary. |
 
-For `ArcDeg` and `ArcRad`, `angle` is the angle from the inferred center to the
+For `ArcDeg` and `ArcLength`, `angle` is the angle from the inferred center to the
 arc's starting point. The center is calculated from the current path position,
-angle, and radius. `direction` is `CW` or `CCW`.
+angle, and radius. `direction` is `CW` or `CCW`. For `ArcLength`, the angular
+span in radians is calculated as `arcLength / radius`.
 
-Radius parameters default to `50`. Arc spans default to 30 degrees: `30` for
-`Arc` and `ArcDeg`, and the equivalent `0.52` radians for `ArcRad`.
+Radius parameters and `arcLength` default to `50`. Degree-based arc spans
+default to `30`.
 
 The reference x/y coordinate used by `ToShape` depends on the target shape:
 

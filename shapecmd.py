@@ -47,6 +47,9 @@ class ShapeCmd(Application):
     PATH_ARROW_LENGTH = 10
     PATH_ARROW_WIDTH = 8
     MAX_PATH_ARROWS = 200
+    DEFAULT_RADIUS = 50
+    DEFAULT_ARC_SPAN_DEGREES = 30
+    DEFAULT_ARC_LENGTH = 50
     DIRECT_POSITION_COMMANDS = {
         "Point",
         "Circle",
@@ -72,7 +75,7 @@ class ShapeCmd(Application):
     )
     NEXT_COMMANDS = (
         "ArcDeg",
-        "ArcRad",
+        "ArcLength",
         "Turn",
         "To",
         "BezierTo",
@@ -81,13 +84,17 @@ class ShapeCmd(Application):
     )
     COMMAND_PARAMETERS = {
         "Point": (("x", 0), ("y", 0)),
-        "Circle": (("center_x", 0), ("center_y", 0), ("radius", 50)),
+        "Circle": (
+            ("center_x", 0),
+            ("center_y", 0),
+            ("radius", DEFAULT_RADIUS),
+        ),
         "Arc": (
             ("center_x", 0),
             ("center_y", 0),
-            ("radius", 50),
+            ("radius", DEFAULT_RADIUS),
             ("start_angle", 0),
-            ("span_deg", 30),
+            ("span_deg", DEFAULT_ARC_SPAN_DEGREES),
             ("direction", "CCW"),
         ),
         "Rect": (("x", 0), ("y", 0), ("x_offset", 0), ("y_offset", 0)),
@@ -100,7 +107,7 @@ class ShapeCmd(Application):
         "RegularPolygon": (
             ("center_x", 0),
             ("center_y", 0),
-            ("radius", 50),
+            ("radius", DEFAULT_RADIUS),
             ("sides", 3),
             ("rotate_deg", 0),
         ),
@@ -108,14 +115,14 @@ class ShapeCmd(Application):
         "ClosedPath": (("x", 0), ("y", 0)),
         "ArcDeg": (
             ("angle", 0),
-            ("radius", 50),
-            ("span_deg", 30),
+            ("radius", DEFAULT_RADIUS),
+            ("span_deg", DEFAULT_ARC_SPAN_DEGREES),
             ("direction", "CCW"),
         ),
-        "ArcRad": (
+        "ArcLength": (
             ("angle", 0),
-            ("radius", 50),
-            ("span_radian", 0.52),
+            ("radius", DEFAULT_RADIUS),
+            ("arc_length", DEFAULT_ARC_LENGTH),
             ("direction", "CCW"),
         ),
         "Turn": (("angle", 0), ("distance", 0)),
@@ -877,15 +884,17 @@ class ShapeCmd(Application):
                         }
                     )
 
-                elif command_name in ("ArcDeg", "ArcRad") and len(command) >= 4:
+                elif command_name in ("ArcDeg", "ArcLength") and len(command) >= 4:
                     arc_start = (current_x, current_y)
                     angle = float(command[1])
                     radius = abs(float(command[2]))
                     span = float(command[3])
                     direction = self.arc_direction(command, span)
+                    angle = math.radians(angle)
                     if command_name == "ArcDeg":
-                        angle = math.radians(angle)
                         span = math.radians(span)
+                    else:
+                        span = span / radius if radius else 0
                     span = abs(span) * (-1 if direction == "CW" else 1)
 
                     center_x = current_x - math.cos(angle) * radius
@@ -1384,10 +1393,7 @@ class ShapeCmd(Application):
             angle = math.atan2(delta_y, delta_x)
             radius = math.hypot(delta_x, delta_y)
             with command:
-                command[1] = round(
-                    math.degrees(angle) if command[0] == "ArcDeg" else angle,
-                    2,
-                )
+                command[1] = round(math.degrees(angle), 2)
                 command[2] = round(radius, 2)
         elif kind == "arc_radius":
             start_x, start_y = handle["start"]
@@ -1413,7 +1419,7 @@ class ShapeCmd(Application):
                 command[3] = round(
                     math.degrees(abs(span))
                     if command[0] == "ArcDeg"
-                    else abs(span),
+                    else abs(span) * abs(float(command[2])),
                     2,
                 )
                 if len(command) < 5:
@@ -1749,7 +1755,7 @@ class ShapeCmd(Application):
                 command[2] = round(distance, 2)
             return
 
-        if command_name in ("ArcDeg", "ArcRad"):
+        if command_name in ("ArcDeg", "ArcLength"):
             handle = next(
                 (handle for handle in handles if handle["kind"] == "arc_center"),
                 None,
@@ -1761,10 +1767,7 @@ class ShapeCmd(Application):
             delta_y = start_y - world_y
             angle = math.atan2(delta_y, delta_x)
             with command:
-                command[1] = round(
-                    math.degrees(angle) if command_name == "ArcDeg" else angle,
-                    2,
-                )
+                command[1] = round(math.degrees(angle), 2)
                 command[2] = round(math.hypot(delta_x, delta_y), 2)
             return
 
