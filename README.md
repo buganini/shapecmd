@@ -110,6 +110,8 @@ segments.
 - `Display Arrow`: show or hide direction arrows on the focused path.
 - `Show`/`Hide` next to a shape name: expand or collapse its commands. Shapes
   are collapsed by default.
+- Each expanded shape has its own command table. Double-click a cell to edit
+  it; Command and Direction cells use drop-down editors.
 - Changing a command type re-enters placement mode. Direct-position commands
   follow the pointer, `Turn` places its endpoint, and path arcs place their
   center.

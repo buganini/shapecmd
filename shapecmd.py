@@ -5,6 +5,7 @@ from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 from PUI.PySide6 import *
+from PySide6 import QtCore, QtWidgets
 
 
 class ArgumentBinding:
@@ -32,6 +33,31 @@ class ArgumentBinding:
             while len(self.values) <= self.index:
                 self.values.append(self.defaults[len(self.values)])
             self.values[self.index] = value
+
+
+class ShapeCommandTable(Table):
+    ROW_HEIGHT = 26
+    HORIZONTAL_SCROLLBAR_HEIGHT = 30
+    FRAME_HEIGHT = 4
+
+    def update(self, prev):
+        super().update(prev)
+        self.ui.setAlternatingRowColors(True)
+        self.ui.setWordWrap(False)
+        self.ui.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        if self.children:
+            self.ui.setColumnWidth(0, 120)
+        self.ui.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
+        self.ui.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.ui.setFixedHeight(
+            self.ROW_HEIGHT * len(self.children)
+            + self.HORIZONTAL_SCROLLBAR_HEIGHT
+            + self.FRAME_HEIGHT
+        )
 
 
 class ShapeCmd(Application):
@@ -220,7 +246,7 @@ class ShapeCmd(Application):
                         .wheel(self.canvas_wheel)
                     )
 
-                with VBox().layout(width=300):
+                with VBox().layout(width=600):
                     with Scroll():
                         with VBox():
                             for shape_idx, shape in enumerate(self.state.shapes):
@@ -234,49 +260,77 @@ class ShapeCmd(Application):
                                     ).click(self.toggle_shape, shape_idx)
 
                                 if self.state.shape_expanded[shape_idx]:
-                                    for cmd_idx, cmd in enumerate(shape["commands"]):
-                                        command_options = (
-                                            self.START_COMMANDS
-                                            if cmd_idx == 0
-                                            else self.NEXT_COMMANDS
+                                    commands = shape["commands"]
+                                    parameter_counts = [
+                                        len(self.COMMAND_PARAMETERS.get(cmd[0], ()))
+                                        for cmd in commands
+                                    ]
+                                    max_parameters = max(parameter_counts, default=0)
+                                    table_height = (
+                                        ShapeCommandTable.ROW_HEIGHT * len(commands)
+                                        + ShapeCommandTable.HORIZONTAL_SCROLLBAR_HEIGHT
+                                        + ShapeCommandTable.FRAME_HEIGHT
+                                    )
+                                    with (
+                                        ShapeCommandTable(
+                                            columnHeader=None,
+                                            rowHeader=None,
+                                            columnCount=1 + max_parameters,
                                         )
-                                        parameters = self.COMMAND_PARAMETERS.get(
-                                            cmd[0], ()
-                                        )
-                                        defaults = (cmd[0],) + tuple(
-                                            default for _, default in parameters
-                                        )
-                                        with HBox():
-                                            with ComboBox(
-                                                editable=True,
-                                                text_model=cmd(0),
-                                            ).layout(width=120).change(
-                                                self.command_changed,
-                                                cmd,
-                                                shape,
-                                            ):
-                                                for command_name in command_options:
-                                                    ComboBoxItem(command_name)
-
-                                            for arg_idx, (arg_name, _) in enumerate(
-                                                parameters,
-                                                start=1,
-                                            ):
-                                                Label(self.parameter_label(arg_name))
-                                                argument = ArgumentBinding(
-                                                    cmd,
-                                                    arg_idx,
-                                                    defaults,
+                                        .id(f"commands-{shape_idx}")
+                                        .layout(height=table_height, weight=0)
+                                    ):
+                                        for cmd_idx, cmd in enumerate(commands):
+                                            parameters = self.COMMAND_PARAMETERS.get(
+                                                cmd[0], ()
+                                            )
+                                            defaults = (cmd[0],) + tuple(
+                                                default for _, default in parameters
+                                            )
+                                            command_choices = (
+                                                self.START_COMMANDS
+                                                if cmd_idx == 0
+                                                else self.NEXT_COMMANDS
+                                            )
+                                            with TableNode():
+                                                (
+                                                    TableNode(
+                                                        str(cmd[0]),
+                                                        choices=command_choices,
+                                                    ).set(
+                                                        self.table_command_changed,
+                                                        cmd,
+                                                        shape,
+                                                    )
                                                 )
-                                                if arg_name == "direction":
-                                                    with ComboBox(
-                                                        text_model=argument,
-                                                    ).layout(width=70):
-                                                        ComboBoxItem("CCW")
-                                                        ComboBoxItem("CW")
-                                                else:
-                                                    TextField(argument).layout(width=64)
-                                            Spacer()
+                                                for arg_idx, (
+                                                    arg_name,
+                                                    _,
+                                                ) in enumerate(
+                                                    parameters,
+                                                    start=1,
+                                                ):
+                                                    argument = ArgumentBinding(
+                                                        cmd,
+                                                        arg_idx,
+                                                        defaults,
+                                                    )
+                                                    value = argument.value
+                                                    choices = (
+                                                        ("CCW", "CW")
+                                                        if arg_name == "direction"
+                                                        else None
+                                                    )
+                                                    (
+                                                        TableNode(
+                                                            value,
+                                                            display=f"{self.parameter_label(arg_name)}: {value}",
+                                                            choices=choices,
+                                                        ).set(
+                                                            self.table_argument_changed,
+                                                            argument,
+                                                        )
+                                                    )
 
                                     if (
                                         shape["commands"]
@@ -1928,6 +1982,15 @@ class ShapeCmd(Application):
             self.focused_command = None
             self.focused_path_commands = commands
         self.begin_placement(command, commands)
+
+    def table_command_changed(self, value, command, shape):
+        with command:
+            command[0] = str(value)
+        self.command_changed(None, command, shape)
+
+    @staticmethod
+    def table_argument_changed(value, argument):
+        argument.value = value
 
     def add_shape(self, event):
         if self.canvas_size is not None and self.view_origin is not None:
