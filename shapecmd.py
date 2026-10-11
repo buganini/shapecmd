@@ -637,6 +637,36 @@ class ShapeCmd(Application):
         except (IndexError, TypeError, ValueError):
             return None
 
+    @staticmethod
+    def translate_shape(shape, delta_x, delta_y):
+        commands = shape.get("commands", [])
+        if not commands or not (delta_x or delta_y):
+            return
+
+        first_command = commands[0]
+        is_path = first_command and first_command[0] in ("Path", "ClosedPath")
+        translated_commands = (
+            [
+                command
+                for index, command in enumerate(commands)
+                if index == 0 or (command and command[0] in ("To", "BezierTo"))
+            ]
+            if is_path
+            else [first_command]
+        )
+
+        for command in translated_commands:
+            if len(command) < 3:
+                continue
+            try:
+                translated_x = round(float(command[1]) + delta_x, 2)
+                translated_y = round(float(command[2]) + delta_y, 2)
+            except (TypeError, ValueError):
+                continue
+            with command:
+                command[1] = translated_x
+                command[2] = translated_y
+
     def closest_point_on_named_shape(self, point, name, resolving):
         target_shape = self.shape_named(name)
         if target_shape is None or not target_shape["commands"]:
@@ -1270,8 +1300,6 @@ class ShapeCmd(Application):
         closed = self.focused_path_commands[0][0] == "ClosedPath"
         geometry = self.path_geometry(self.focused_path_commands, closed=closed)
         for handle in reversed(geometry["handles"]):
-            if handle["kind"] in ("to_shape", "to_shape_edge"):
-                continue
             handle_x, handle_y = self.world_to_canvas(*handle["point"])
             if (
                 math.hypot(canvas_x - handle_x, canvas_y - handle_y)
@@ -1306,7 +1334,15 @@ class ShapeCmd(Application):
         target_y = world_y + self.drag_offset[1]
         kind = handle["kind"]
 
-        if kind in ("path_start", "to", "bezier_to"):
+        if kind in ("to_shape", "to_shape_edge"):
+            target_shape = self.shape_named(command[1])
+            if target_shape is None or self.drag_position is None:
+                return
+            delta_x = world_x - self.drag_position[0]
+            delta_y = world_y - self.drag_position[1]
+            self.translate_shape(target_shape, delta_x, delta_y)
+            self.drag_position = (world_x, world_y)
+        elif kind in ("path_start", "to", "bezier_to"):
             with command:
                 command[1] = round(target_x, 2)
                 command[2] = round(target_y, 2)
@@ -1452,6 +1488,7 @@ class ShapeCmd(Application):
                     path_handle["kind"],
                 )
                 self.drag_offset = (handle_x - world_x, handle_y - world_y)
+                self.drag_position = (world_x, world_y)
                 return
 
             path_commands = self.path_at(event.x, event.y)
