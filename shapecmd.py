@@ -24,6 +24,8 @@ class ArgumentBinding:
             value = converter(value)
         except (TypeError, ValueError):
             return
+        if isinstance(value, float):
+            value = round(value, 2)
 
         with self.values:
             while len(self.values) <= self.index:
@@ -145,6 +147,9 @@ class ShapeCmd(Application):
                     raise ValueError(
                         'Each command must use the ["command", argument, ...] format'
                     )
+                for index, value in enumerate(command[1:], start=1):
+                    if isinstance(value, float):
+                        command[index] = round(value, 2)
 
         return data["shapes"]
 
@@ -222,6 +227,7 @@ class ShapeCmd(Application):
                                                     ComboBoxItem("CW")
                                             else:
                                                 TextField(argument).layout(width=64)
+                                        Spacer()
 
                                 if (
                                     shape["commands"]
@@ -613,6 +619,16 @@ class ShapeCmd(Application):
                                 "start": arc_start,
                             },
                             {
+                                "kind": "arc_radius",
+                                "command": command,
+                                "point": (
+                                    (arc_start[0] + center_x) / 2,
+                                    (arc_start[1] + center_y) / 2,
+                                ),
+                                "start": arc_start,
+                                "angle": angle,
+                            },
+                            {
                                 "kind": "arc_end",
                                 "command": command,
                                 "point": (current_x, current_y),
@@ -897,8 +913,8 @@ class ShapeCmd(Application):
 
         if kind in ("path_start", "to", "bezier_to"):
             with command:
-                command[1] = target_x
-                command[2] = target_y
+                command[1] = round(target_x, 2)
+                command[2] = round(target_y, 2)
         elif kind == "turn":
             origin_x, origin_y = handle["origin"]
             delta_x = target_x - origin_x
@@ -913,8 +929,8 @@ class ShapeCmd(Application):
                 new_heading - handle["heading_before"]
             )
             with command:
-                command[1] = math.degrees(turn_angle)
-                command[2] = distance
+                command[1] = round(math.degrees(turn_angle), 2)
+                command[2] = round(distance, 2)
         elif kind == "arc_center":
             start_x, start_y = handle["start"]
             delta_x = start_x - target_x
@@ -922,10 +938,21 @@ class ShapeCmd(Application):
             angle = math.atan2(delta_y, delta_x)
             radius = math.hypot(delta_x, delta_y)
             with command:
-                command[1] = (
-                    math.degrees(angle) if command[0] == "ArcDeg" else angle
+                command[1] = round(
+                    math.degrees(angle) if command[0] == "ArcDeg" else angle,
+                    2,
                 )
-                command[2] = radius
+                command[2] = round(radius, 2)
+        elif kind == "arc_radius":
+            start_x, start_y = handle["start"]
+            direction_x = -math.cos(handle["angle"])
+            direction_y = -math.sin(handle["angle"])
+            projected_half_radius = (
+                (target_x - start_x) * direction_x
+                + (target_y - start_y) * direction_y
+            )
+            with command:
+                command[2] = round(max(0, projected_half_radius * 2), 2)
         elif kind == "arc_end":
             center_x, center_y = handle["center"]
             end_angle = math.atan2(target_y - center_y, target_x - center_x)
@@ -937,8 +964,11 @@ class ShapeCmd(Application):
             elif direction == "CW" and span > 0:
                 span -= 2 * math.pi
             with command:
-                command[3] = (
-                    math.degrees(abs(span)) if command[0] == "ArcDeg" else abs(span)
+                command[3] = round(
+                    math.degrees(abs(span))
+                    if command[0] == "ArcDeg"
+                    else abs(span),
+                    2,
                 )
                 if len(command) < 5:
                     command.append(direction)
@@ -970,7 +1000,7 @@ class ShapeCmd(Application):
             canvas.drawText(
                 12,
                 12,
-                f"X: {world_x:.3f}  Y: {world_y:.3f}  Zoom: {self.zoom:.3f}x",
+                f"X: {world_x:.2f}  Y: {world_y:.2f}  Zoom: {self.zoom:.3f}x",
                 size=11,
                 color=0x555555,
             )
@@ -1068,16 +1098,19 @@ class ShapeCmd(Application):
             world_x, world_y = self.canvas_to_world(event.x, event.y)
             offset_x, offset_y = self.drag_offset
             with self.focused_command:
-                self.focused_command[1] = world_x + offset_x
-                self.focused_command[2] = world_y + offset_y
+                self.focused_command[1] = round(world_x + offset_x, 2)
+                self.focused_command[2] = round(world_y + offset_y, 2)
         elif self.drag_action == "radius" and self.focused_command is not None:
             geometry = self.circle_geometry(self.focused_command)
             if geometry is not None:
                 center_x, _, _ = geometry
                 world_x, _ = self.canvas_to_world(event.x, event.y)
-                self.focused_command[3] = max(
-                    0.0,
-                    world_x - center_x + self.drag_offset,
+                self.focused_command[3] = round(
+                    max(
+                        0.0,
+                        world_x - center_x + self.drag_offset,
+                    ),
+                    2,
                 )
         elif self.drag_action == "path_handle":
             world_x, world_y = self.canvas_to_world(event.x, event.y)
