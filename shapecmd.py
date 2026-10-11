@@ -65,6 +65,7 @@ class ShapeCmd(Application):
         "To",
         "BezierTo",
         "ToShape",
+        "ToShapeEdge",
     )
     COMMAND_PARAMETERS = {
         "Point": (("x", 0), ("y", 0)),
@@ -109,6 +110,7 @@ class ShapeCmd(Application):
         "To": (("x", 0), ("y", 0)),
         "BezierTo": (("x", 0), ("y", 0)),
         "ToShape": (("name", ""),),
+        "ToShapeEdge": (("name", ""),),
     }
 
     def __init__(self, input_path):
@@ -612,12 +614,11 @@ class ShapeCmd(Application):
 
         return closest
 
-    def closest_point_on_named_shape(self, point, name, resolving):
+    def shape_named(self, name):
         name = str(name)
         if not name:
             return None
-
-        target_shape = next(
+        return next(
             (
                 shape
                 for shape in self.state.shapes
@@ -625,6 +626,19 @@ class ShapeCmd(Application):
             ),
             None,
         )
+
+    def named_shape_xy(self, name):
+        target_shape = self.shape_named(name)
+        if target_shape is None or not target_shape["commands"]:
+            return None
+        command = target_shape["commands"][0]
+        try:
+            return float(command[1]), float(command[2])
+        except (IndexError, TypeError, ValueError):
+            return None
+
+    def closest_point_on_named_shape(self, point, name, resolving):
+        target_shape = self.shape_named(name)
         if target_shape is None or not target_shape["commands"]:
             return None
 
@@ -766,12 +780,18 @@ class ShapeCmd(Application):
                         }
                     )
 
-                elif command_name == "ToShape" and len(command) >= 2:
-                    next_point = self.closest_point_on_named_shape(
-                        (current_x, current_y),
-                        command[1],
-                        resolving,
-                    )
+                elif (
+                    command_name in ("ToShape", "ToShapeEdge")
+                    and len(command) >= 2
+                ):
+                    if command_name == "ToShape":
+                        next_point = self.named_shape_xy(command[1])
+                    else:
+                        next_point = self.closest_point_on_named_shape(
+                            (current_x, current_y),
+                            command[1],
+                            resolving,
+                        )
                     if next_point is None:
                         continue
 
@@ -784,7 +804,11 @@ class ShapeCmd(Application):
                     points.append((current_x, current_y))
                     handles.append(
                         {
-                            "kind": "to_shape",
+                            "kind": (
+                                "to_shape"
+                                if command_name == "ToShape"
+                                else "to_shape_edge"
+                            ),
                             "command": command,
                             "point": (current_x, current_y),
                         }
@@ -1246,7 +1270,7 @@ class ShapeCmd(Application):
         closed = self.focused_path_commands[0][0] == "ClosedPath"
         geometry = self.path_geometry(self.focused_path_commands, closed=closed)
         for handle in reversed(geometry["handles"]):
-            if handle["kind"] == "to_shape":
+            if handle["kind"] in ("to_shape", "to_shape_edge"):
                 continue
             handle_x, handle_y = self.world_to_canvas(*handle["point"])
             if (
