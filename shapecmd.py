@@ -77,7 +77,7 @@ class ShapeCmd(Application):
         "ClosedPath",
     )
     NEXT_COMMANDS = (
-        "ArcDeg",
+        "ArcDegree",
         "ArcLength",
         "Turn",
         "To",
@@ -116,7 +116,7 @@ class ShapeCmd(Application):
         ),
         "Path": (("x", 0), ("y", 0)),
         "ClosedPath": (("x", 0), ("y", 0)),
-        "ArcDeg": (
+        "ArcDegree": (
             ("angle", 0),
             ("radius", DEFAULT_RADIUS),
             ("span_deg", DEFAULT_ARC_SPAN_DEGREES),
@@ -893,14 +893,14 @@ class ShapeCmd(Application):
                         }
                     )
 
-                elif command_name in ("ArcDeg", "ArcLength") and len(command) >= 4:
+                elif command_name in ("ArcDegree", "ArcLength") and len(command) >= 4:
                     arc_start = (current_x, current_y)
                     angle = float(command[1])
                     radius = abs(float(command[2]))
                     span = float(command[3])
                     direction = self.arc_direction(command, span)
                     angle = math.radians(angle)
-                    if command_name == "ArcDeg":
+                    if command_name == "ArcDegree":
                         span = math.radians(span)
                     else:
                         span = span / radius if radius else 0
@@ -1427,7 +1427,7 @@ class ShapeCmd(Application):
             with command:
                 command[3] = round(
                     math.degrees(abs(span))
-                    if command[0] == "ArcDeg"
+                    if command[0] == "ArcDegree"
                     else abs(span) * abs(float(command[2])),
                     2,
                 )
@@ -1766,7 +1766,7 @@ class ShapeCmd(Application):
                 command[2] = round(distance, 2)
             return
 
-        if command_name in ("ArcDeg", "ArcLength"):
+        if command_name in ("ArcDegree", "ArcLength"):
             handle = next(
                 (handle for handle in handles if handle["kind"] == "arc_center"),
                 None,

@@ -73,12 +73,12 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | `To` | `x, y` | Draws to an absolute coordinate. |
 | `Turn` | `angle, distance` | Turns relative to the current heading, then advances by the specified distance. |
 | `BezierTo` | `x, y` | Draws to the endpoint using cubic Bézier control points calculated from the previous heading. |
-| `ArcDeg` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
+| `ArcDegree` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
 | `ArcLength` | `angle, radius, arcLength, direction` | Draws an arc from the current point with its extent specified as a linear arc length. |
 | `ToShape` | `name` | Draws to the target shape's reference x/y coordinate. |
 | `ToShapeEdge` | `name` | Draws to the nearest point on the target shape's boundary. |
 
-For `ArcDeg` and `ArcLength`, `angle` is the angle from the inferred center to the
+For `ArcDegree` and `ArcLength`, `angle` is the angle from the inferred center to the
 arc's starting point. The center is calculated from the current path position,
 angle, and radius. `direction` is `CW` or `CCW`. For `ArcLength`, the angular
 span in radians is calculated as `arcLength / radius`.
