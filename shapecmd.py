@@ -117,6 +117,10 @@ class ShapeCmd(Application):
         self.state = State()
         self.state.display_arrow = True
         self.state.shapes = State(self.load_shapes(self.input_path), deep=True)
+        self.state.shape_expanded = State(
+            [False for _ in self.state.shapes],
+            deep=True,
+        )
         self.canvas_size = None
         self.view_origin = None
         self.zoom = 1.0
@@ -186,56 +190,66 @@ class ShapeCmd(Application):
                     with Scroll():
                         with VBox():
                             for shape_idx, shape in enumerate(self.state.shapes):
-                                with HBox():
+                                with HBox().id(f"{shape_idx}"):
                                     Label("Name")
                                     TextField(shape("name"))
-                                for cmd_idx, cmd in enumerate(shape["commands"]):
-                                    command_options = (
-                                        self.START_COMMANDS
-                                        if cmd_idx == 0
-                                        else self.NEXT_COMMANDS
-                                    )
-                                    parameters = self.COMMAND_PARAMETERS.get(cmd[0], ())
-                                    defaults = (cmd[0],) + tuple(
-                                        default for _, default in parameters
-                                    )
-                                    with HBox():
-                                        with ComboBox(
-                                            editable=True,
-                                            text_model=cmd(0),
-                                        ).layout(width=120).change(
-                                            self.command_changed,
-                                            cmd,
-                                        ):
-                                            for command_name in command_options:
-                                                ComboBoxItem(command_name)
+                                    Button(
+                                        "Hide"
+                                        if self.state.shape_expanded[shape_idx]
+                                        else "Show"
+                                    ).click(self.toggle_shape, shape_idx)
 
-                                        for arg_idx, (arg_name, _) in enumerate(
-                                            parameters,
-                                            start=1,
-                                        ):
-                                            Label(self.parameter_label(arg_name))
-                                            argument = ArgumentBinding(
+                                if self.state.shape_expanded[shape_idx]:
+                                    for cmd_idx, cmd in enumerate(shape["commands"]):
+                                        command_options = (
+                                            self.START_COMMANDS
+                                            if cmd_idx == 0
+                                            else self.NEXT_COMMANDS
+                                        )
+                                        parameters = self.COMMAND_PARAMETERS.get(
+                                            cmd[0], ()
+                                        )
+                                        defaults = (cmd[0],) + tuple(
+                                            default for _, default in parameters
+                                        )
+                                        with HBox():
+                                            with ComboBox(
+                                                editable=True,
+                                                text_model=cmd(0),
+                                            ).layout(width=120).change(
+                                                self.command_changed,
                                                 cmd,
-                                                arg_idx,
-                                                defaults,
-                                            )
-                                            if arg_name == "direction":
-                                                with ComboBox(
-                                                    text_model=argument,
-                                                ).layout(width=70):
-                                                    ComboBoxItem("CCW")
-                                                    ComboBoxItem("CW")
-                                            else:
-                                                TextField(argument).layout(width=64)
-                                        Spacer()
+                                            ):
+                                                for command_name in command_options:
+                                                    ComboBoxItem(command_name)
 
-                                if (
-                                    shape["commands"]
-                                    and shape["commands"][0][0] in ("Path", "ClosedPath")
-                                ):
-                                    Button("Add Next").click(self.add_next, shape)
-                                Divider()
+                                            for arg_idx, (arg_name, _) in enumerate(
+                                                parameters,
+                                                start=1,
+                                            ):
+                                                Label(self.parameter_label(arg_name))
+                                                argument = ArgumentBinding(
+                                                    cmd,
+                                                    arg_idx,
+                                                    defaults,
+                                                )
+                                                if arg_name == "direction":
+                                                    with ComboBox(
+                                                        text_model=argument,
+                                                    ).layout(width=70):
+                                                        ComboBoxItem("CCW")
+                                                        ComboBoxItem("CW")
+                                                else:
+                                                    TextField(argument).layout(width=64)
+                                            Spacer()
+
+                                    if (
+                                        shape["commands"]
+                                        and shape["commands"][0][0]
+                                        in ("Path", "ClosedPath")
+                                    ):
+                                        Button("Add Next").click(self.add_next, shape)
+                                    Divider()
                             Spacer()
                     Button("Add Shape").click(self.add_shape)
                     Button("Save").click(self.save)
@@ -1628,12 +1642,16 @@ class ShapeCmd(Application):
                 command.append(default)
 
     def add_shape(self, event):
+        self.state.shape_expanded.append(False)
         self.state.shapes.append(
             State(
                 {"name": "", "commands": [["Point", 0, 0]]},
                 deep=True,
             )
         )
+
+    def toggle_shape(self, event, shape_idx):
+        self.state.shape_expanded[shape_idx] = not self.state.shape_expanded[shape_idx]
 
     def save(self, event):
         output_path = SaveFile(
