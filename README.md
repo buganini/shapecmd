@@ -82,6 +82,9 @@ For `ArcDeg` and `ArcRad`, `angle` is the angle from the inferred center to the
 arc's starting point. The center is calculated from the current path position,
 angle, and radius. `direction` is `CW` or `CCW`.
 
+Radius parameters default to `50`. Arc spans default to 30 degrees: `30` for
+`Arc` and `ArcDeg`, and the equivalent `0.52` radians for `ArcRad`.
+
 The reference x/y coordinate used by `ToShape` depends on the target shape:
 
 - `Point`: point coordinates.
@@ -104,7 +107,13 @@ segments.
 - `Display Arrow`: show or hide direction arrows on the focused path.
 - `Show`/`Hide` next to a shape name: expand or collapse its commands. Shapes
   are collapsed by default.
-- `Add Shape`: add a new shape initialized with a `Point` command.
+- Changing a command type re-enters placement mode. Direct-position commands
+  follow the pointer, `Turn` places its endpoint, and path arcs place their
+  center.
+- `Add Next`: append a `To` command and move it with the pointer until the next
+  left click places it.
+- `Add Shape`: add a shape initialized with a `Point`, then move it with the
+  pointer until the next left click places it.
 - `Save`: choose an output path and save the JSON data.
 
 ## Focus Handles

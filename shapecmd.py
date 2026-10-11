@@ -47,6 +47,18 @@ class ShapeCmd(Application):
     PATH_ARROW_LENGTH = 10
     PATH_ARROW_WIDTH = 8
     MAX_PATH_ARROWS = 200
+    DIRECT_POSITION_COMMANDS = {
+        "Point",
+        "Circle",
+        "Arc",
+        "Rect",
+        "CenterRect",
+        "RegularPolygon",
+        "Path",
+        "ClosedPath",
+        "To",
+        "BezierTo",
+    }
 
     START_COMMANDS = (
         "Point",
@@ -69,13 +81,13 @@ class ShapeCmd(Application):
     )
     COMMAND_PARAMETERS = {
         "Point": (("x", 0), ("y", 0)),
-        "Circle": (("center_x", 0), ("center_y", 0), ("radius", 0)),
+        "Circle": (("center_x", 0), ("center_y", 0), ("radius", 50)),
         "Arc": (
             ("center_x", 0),
             ("center_y", 0),
-            ("radius", 0),
+            ("radius", 50),
             ("start_angle", 0),
-            ("span_deg", 0),
+            ("span_deg", 30),
             ("direction", "CCW"),
         ),
         "Rect": (("x", 0), ("y", 0), ("x_offset", 0), ("y_offset", 0)),
@@ -88,7 +100,7 @@ class ShapeCmd(Application):
         "RegularPolygon": (
             ("center_x", 0),
             ("center_y", 0),
-            ("radius", 0),
+            ("radius", 50),
             ("sides", 3),
             ("rotate_deg", 0),
         ),
@@ -96,14 +108,14 @@ class ShapeCmd(Application):
         "ClosedPath": (("x", 0), ("y", 0)),
         "ArcDeg": (
             ("angle", 0),
-            ("radius", 0),
-            ("span_deg", 0),
+            ("radius", 50),
+            ("span_deg", 30),
             ("direction", "CCW"),
         ),
         "ArcRad": (
             ("angle", 0),
-            ("radius", 0),
-            ("span_radian", 0),
+            ("radius", 50),
+            ("span_radian", 0.52),
             ("direction", "CCW"),
         ),
         "Turn": (("angle", 0), ("distance", 0)),
@@ -132,6 +144,8 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
+        self.placement_command = None
+        self.placement_commands = None
         self.cursor_position = None
 
     @staticmethod
@@ -221,6 +235,7 @@ class ShapeCmd(Application):
                                             ).layout(width=120).change(
                                                 self.command_changed,
                                                 cmd,
+                                                shape,
                                             ):
                                                 for command_name in command_options:
                                                     ComboBoxItem(command_name)
@@ -1438,6 +1453,7 @@ class ShapeCmd(Application):
 
     def canvas_mouseenter(self, event):
         self.cursor_position = (event.x, event.y)
+        self.move_placement_to_canvas(event.x, event.y)
         self.redraw()
 
     def canvas_mouseleave(self, event):
@@ -1454,6 +1470,13 @@ class ShapeCmd(Application):
         self.cursor_position = (event.x, event.y)
 
         if self.view_origin is None:
+            return
+
+        if event.button == MouseButton.LEFT and self.placement_command is not None:
+            self.move_placement_to_canvas(event.x, event.y)
+            self.placement_command = None
+            self.placement_commands = None
+            self.redraw()
             return
 
         if event.button == MouseButton.LEFT:
@@ -1571,6 +1594,7 @@ class ShapeCmd(Application):
             self.drag_standalone_handle(world_x, world_y)
 
         self.cursor_position = (event.x, event.y)
+        self.move_placement_to_canvas(event.x, event.y)
         self.redraw()
 
     def canvas_wheel(self, event):
@@ -1679,19 +1703,114 @@ class ShapeCmd(Application):
         ]
         self.redraw()
 
+    def move_placement_to_canvas(self, canvas_x, canvas_y):
+        if self.placement_command is None or self.view_origin is None:
+            return
+        world_x, world_y = self.canvas_to_world(canvas_x, canvas_y)
+        command = self.placement_command
+        command_name = command[0]
+
+        if command_name in self.DIRECT_POSITION_COMMANDS and len(command) >= 3:
+            with command:
+                command[1] = round(world_x, 2)
+                command[2] = round(world_y, 2)
+            return
+
+        if self.placement_commands is None:
+            return
+        geometry = self.path_geometry(self.placement_commands, closed=False)
+        handles = [
+            handle
+            for handle in geometry["handles"]
+            if handle["command"] is command
+        ]
+
+        if command_name == "Turn":
+            handle = next(
+                (handle for handle in handles if handle["kind"] == "turn"),
+                None,
+            )
+            if handle is None:
+                return
+            origin_x, origin_y = handle["origin"]
+            delta_x = world_x - origin_x
+            delta_y = world_y - origin_y
+            distance = math.hypot(delta_x, delta_y)
+            new_heading = (
+                math.atan2(delta_y, delta_x)
+                if distance
+                else handle["heading_before"]
+            )
+            turn_angle = self.signed_angle_delta(
+                new_heading - handle["heading_before"]
+            )
+            with command:
+                command[1] = round(math.degrees(turn_angle), 2)
+                command[2] = round(distance, 2)
+            return
+
+        if command_name in ("ArcDeg", "ArcRad"):
+            handle = next(
+                (handle for handle in handles if handle["kind"] == "arc_center"),
+                None,
+            )
+            if handle is None:
+                return
+            start_x, start_y = handle["start"]
+            delta_x = start_x - world_x
+            delta_y = start_y - world_y
+            angle = math.atan2(delta_y, delta_x)
+            with command:
+                command[1] = round(
+                    math.degrees(angle) if command_name == "ArcDeg" else angle,
+                    2,
+                )
+                command[2] = round(math.hypot(delta_x, delta_y), 2)
+            return
+
+        if command_name in ("ToShape", "ToShapeEdge") and len(command) >= 2:
+            handle_kind = (
+                "to_shape" if command_name == "ToShape" else "to_shape_edge"
+            )
+            handle = next(
+                (handle for handle in handles if handle["kind"] == handle_kind),
+                None,
+            )
+            target_shape = self.shape_named(command[1])
+            if handle is None or target_shape is None:
+                return
+            handle_x, handle_y = handle["point"]
+            self.translate_shape(
+                target_shape,
+                world_x - handle_x,
+                world_y - handle_y,
+            )
+
+    def begin_placement(self, command, commands=None):
+        self.placement_command = command
+        self.placement_commands = commands
+        self.drag_action = None
+        self.drag_target = None
+        self.drag_position = None
+        self.drag_offset = None
+        if self.cursor_position is not None:
+            self.move_placement_to_canvas(*self.cursor_position)
+        self.redraw()
+
     def add_next(self, event, shape):
-        shape["commands"].append(State(["To", 0, 0], deep=True))
+        commands = shape["commands"]
+        geometry = self.path_geometry(commands, closed=False)
+        initial_x, initial_y = geometry["points"][-1] if geometry["points"] else (0, 0)
+        command = State(
+            ["To", round(initial_x, 2), round(initial_y, 2)],
+            deep=True,
+        )
+        commands.append(command)
+        self.focused_command = None
+        self.focused_path_commands = commands
+        self.begin_placement(command, commands)
 
-    def command_changed(self, event, command):
-        if command is self.focused_command and command[0] in ("Path", "ClosedPath"):
-            self.focused_command = None
-        if (
-            self.focused_path_commands is not None
-            and command is self.focused_path_commands[0]
-            and command[0] not in ("Path", "ClosedPath")
-        ):
-            self.focused_path_commands = None
-
+    def command_changed(self, event, command, shape):
         parameters = self.COMMAND_PARAMETERS.get(command[0])
         if parameters is None:
             return
@@ -1702,14 +1821,38 @@ class ShapeCmd(Application):
             for _, default in parameters:
                 command.append(default)
 
+        commands = shape["commands"]
+        if command is commands[0] and command[0] not in ("Path", "ClosedPath"):
+            self.focused_command = command
+            self.focused_path_commands = None
+        else:
+            self.focused_command = None
+            self.focused_path_commands = commands
+        self.begin_placement(command, commands)
+
     def add_shape(self, event):
-        self.state.shape_expanded.append(False)
-        self.state.shapes.append(
-            State(
-                {"name": "", "commands": [["Point", 0, 0]]},
-                deep=True,
+        if self.canvas_size is not None and self.view_origin is not None:
+            initial_x, initial_y = self.canvas_to_world(
+                self.canvas_size[0] / 2,
+                self.canvas_size[1] / 2,
             )
+        else:
+            initial_x, initial_y = 0, 0
+        shape = State(
+            {
+                "name": "",
+                "commands": [
+                    ["Point", round(initial_x, 2), round(initial_y, 2)]
+                ],
+            },
+            deep=True,
         )
+        self.state.shape_expanded.append(False)
+        self.state.shapes.append(shape)
+        command = shape["commands"][0]
+        self.focused_command = command
+        self.focused_path_commands = None
+        self.begin_placement(command, shape["commands"])
 
     def toggle_shape(self, event, shape_idx):
         self.state.shape_expanded[shape_idx] = not self.state.shape_expanded[shape_idx]
