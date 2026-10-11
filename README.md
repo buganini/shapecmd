@@ -126,8 +126,8 @@ segments.
 - `Point`: position.
 - `Circle`: center and right-side radius handle.
 - `Arc`: center, start, end, and an `R/2` radius handle on the start side.
-- `Rect`: origin and opposite corner.
-- `CenterRect`: center and upper-right corner.
+- `Rect`: origin, opposite corner, and rotation handle.
+- `CenterRect`: center, upper-right corner, and rotation handle.
 - `RegularPolygon`: center and first vertex. The vertex controls both the radius
   and `rotateDeg`.
 - `Path` and `ClosedPath`: starting point and editable command endpoints.

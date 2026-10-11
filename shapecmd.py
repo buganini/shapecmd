@@ -51,6 +51,7 @@ class ShapeCmd(Application):
     DEFAULT_RADIUS = 50
     DEFAULT_ARC_SPAN_DEGREES = 30
     DEFAULT_ARC_LENGTH = 50
+    ROTATION_HANDLE_OFFSET = 20
     SVG_PADDING = 10
     SVG_POINT_RADIUS = 2
     DIRECT_POSITION_COMMANDS = {
@@ -499,6 +500,17 @@ class ShapeCmd(Application):
                     )
 
                 corner = rect_point(x_offset, y_offset)
+                handle_offset = self.ROTATION_HANDLE_OFFSET / max(
+                    abs(getattr(self, "zoom", 1.0)),
+                    self.MIN_ZOOM,
+                )
+                top_y = max(0, y_offset)
+                rotation_edge = rect_point(x_offset / 2, top_y)
+                rotation_handle_local = (
+                    x_offset / 2,
+                    top_y + handle_offset,
+                )
+                rotation_handle = rect_point(*rotation_handle_local)
                 points = [
                     origin,
                     rect_point(x_offset, 0),
@@ -516,8 +528,17 @@ class ShapeCmd(Application):
                             "origin": origin,
                             "rotation": rotation,
                         },
+                        {
+                            "kind": "rect_rotation",
+                            "point": rotation_handle,
+                            "pivot": origin,
+                            "angle_offset": math.atan2(
+                                rotation_handle_local[1],
+                                rotation_handle_local[0],
+                            ),
+                        },
                     ],
-                    "guides": [],
+                    "guides": [(rotation_edge, rotation_handle)],
                     "closed": True,
                 }
 
@@ -536,6 +557,12 @@ class ShapeCmd(Application):
                     )
 
                 corner = center_rect_point(half_width, half_height)
+                handle_offset = self.ROTATION_HANDLE_OFFSET / max(
+                    abs(getattr(self, "zoom", 1.0)),
+                    self.MIN_ZOOM,
+                )
+                rotation_edge = center_rect_point(0, half_height)
+                rotation_handle = center_rect_point(0, half_height + handle_offset)
                 points = [
                     center_rect_point(-half_width, -half_height),
                     center_rect_point(half_width, -half_height),
@@ -553,8 +580,17 @@ class ShapeCmd(Application):
                             "center": center,
                             "rotation": rotation,
                         },
+                        {
+                            "kind": "rect_rotation",
+                            "point": rotation_handle,
+                            "pivot": center,
+                            "angle_offset": math.pi / 2,
+                        },
                     ],
-                    "guides": [(center, corner)],
+                    "guides": [
+                        (center, corner),
+                        (rotation_edge, rotation_handle),
+                    ],
                     "closed": True,
                 }
 
@@ -1305,6 +1341,17 @@ class ShapeCmd(Application):
                 local_y = -delta_x * sine + delta_y * cosine
                 command[3] = round(abs(local_x) * 2, 2)
                 command[4] = round(abs(local_y) * 2, 2)
+            elif kind == "rect_rotation":
+                pivot_x, pivot_y = handle["pivot"]
+                rotation = math.degrees(
+                    self.signed_angle_delta(
+                        math.atan2(target_y - pivot_y, target_x - pivot_x)
+                        - handle["angle_offset"]
+                    )
+                )
+                while len(command) <= 5:
+                    command.append(0)
+                command[5] = round(rotation, 2)
             elif kind == "polygon_vertex":
                 center_x, center_y = handle["center"]
                 delta_x = target_x - center_x
