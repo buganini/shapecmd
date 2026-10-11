@@ -1639,15 +1639,7 @@ class ShapeCmd(Application):
 
         radial_unit_x = radial_x / old_radius
         radial_unit_y = radial_y / old_radius
-        signed_half_radius = (
-            (target_x - old_center_x) * radial_unit_x
-            + (target_y - old_center_y) * radial_unit_y
-        )
-        flipped = signed_half_radius < 0
         direction = state["direction"]
-        if flipped:
-            direction = "CW" if direction == "CCW" else "CCW"
-        radius = abs(signed_half_radius) * 2
 
         chord_x = end_x - start_x
         chord_y = end_y - start_y
@@ -1655,6 +1647,13 @@ class ShapeCmd(Application):
         old_span = abs(state["span"])
 
         if chord_length <= 1e-9:
+            signed_half_radius = (
+                (target_x - old_center_x) * radial_unit_x
+                + (target_y - old_center_y) * radial_unit_y
+            )
+            if signed_half_radius < 0:
+                direction = "CW" if direction == "CCW" else "CCW"
+            radius = abs(signed_half_radius) * 2
             start_unit_x = (start_x - old_center_x) / old_radius
             start_unit_y = (start_y - old_center_y) / old_radius
             start_angle = math.atan2(start_unit_y, start_unit_x)
@@ -1666,29 +1665,34 @@ class ShapeCmd(Application):
             chord_mid_x = (start_x + end_x) / 2
             chord_mid_y = (start_y + end_y) / 2
             half_chord = chord_length / 2
-            radius = max(radius, half_chord)
-            center_distance = math.sqrt(
-                max(0, radius * radius - half_chord * half_chord)
+            original_handle_distance = (
+                (state["point"][0] - chord_mid_x) * normal_x
+                + (state["point"][1] - chord_mid_y) * normal_y
             )
-            centers = (
-                (
-                    chord_mid_x + normal_x * center_distance,
-                    chord_mid_y + normal_y * center_distance,
-                ),
-                (
-                    chord_mid_x - normal_x * center_distance,
-                    chord_mid_y - normal_y * center_distance,
-                ),
+            handle_distance = (
+                (target_x - chord_mid_x) * normal_x
+                + (target_y - chord_mid_y) * normal_y
             )
-            distance_key = lambda center: math.hypot(
-                center[0] - old_center_x,
-                center[1] - old_center_y,
+            midpoint_side = (
+                (midpoint_x - old_center_x) * normal_x
+                + (midpoint_y - old_center_y) * normal_y
             )
-            center_x, center_y = (
-                max(centers, key=distance_key)
-                if flipped
-                else min(centers, key=distance_key)
-            )
+            arc_side = 1 if midpoint_side >= 0 else -1
+            crossed = original_handle_distance * handle_distance < 0
+            if crossed:
+                arc_side *= -1
+                direction = "CW" if direction == "CCW" else "CCW"
+            center_distance = (
+                4 * handle_distance
+                - arc_side
+                * math.sqrt(
+                    4 * handle_distance * handle_distance
+                    + 3 * half_chord * half_chord
+                )
+            ) / 3
+            center_x = chord_mid_x + normal_x * center_distance
+            center_y = chord_mid_y + normal_y * center_distance
+            radius = math.hypot(half_chord, center_distance)
             start_angle = math.atan2(start_y - center_y, start_x - center_x)
             end_angle = math.atan2(end_y - center_y, end_x - center_x)
             if direction == "CW":
