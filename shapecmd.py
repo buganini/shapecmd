@@ -39,6 +39,7 @@ class ShapeCmd(Application):
     HANDLE_HIT_RADIUS = 9
     SHAPE_HIT_MARGIN = 6
     ARC_SEGMENT_DEGREES = 5
+    BEZIER_SEGMENTS = 32
     FIT_PADDING = 100
     PATH_ARROW_SPACING = 80
     PATH_ARROW_LENGTH = 10
@@ -365,6 +366,59 @@ class ShapeCmd(Application):
                     handles.append(
                         {
                             "kind": "to",
+                            "command": command,
+                            "point": (current_x, current_y),
+                        }
+                    )
+
+                elif command_name == "BezierTo" and len(command) >= 3:
+                    start_x, start_y = current_x, current_y
+                    next_x = float(command[1])
+                    next_y = float(command[2])
+                    delta_x = next_x - start_x
+                    delta_y = next_y - start_y
+                    distance = math.hypot(delta_x, delta_y)
+
+                    if distance:
+                        control_distance = distance / 3
+                        control1_x = (
+                            start_x + math.cos(heading) * control_distance
+                        )
+                        control1_y = (
+                            start_y + math.sin(heading) * control_distance
+                        )
+                        end_heading = math.atan2(delta_y, delta_x)
+                        control2_x = (
+                            next_x - math.cos(end_heading) * control_distance
+                        )
+                        control2_y = (
+                            next_y - math.sin(end_heading) * control_distance
+                        )
+
+                        for segment_index in range(1, self.BEZIER_SEGMENTS + 1):
+                            t = segment_index / self.BEZIER_SEGMENTS
+                            inverse_t = 1 - t
+                            current_x = (
+                                inverse_t**3 * start_x
+                                + 3 * inverse_t**2 * t * control1_x
+                                + 3 * inverse_t * t**2 * control2_x
+                                + t**3 * next_x
+                            )
+                            current_y = (
+                                inverse_t**3 * start_y
+                                + 3 * inverse_t**2 * t * control1_y
+                                + 3 * inverse_t * t**2 * control2_y
+                                + t**3 * next_y
+                            )
+                            points.append((current_x, current_y))
+
+                        heading = end_heading
+                    else:
+                        current_x, current_y = next_x, next_y
+
+                    handles.append(
+                        {
+                            "kind": "bezier_to",
                             "command": command,
                             "point": (current_x, current_y),
                         }
@@ -713,7 +767,7 @@ class ShapeCmd(Application):
         target_y = world_y + self.drag_offset[1]
         kind = handle["kind"]
 
-        if kind in ("path_start", "to"):
+        if kind in ("path_start", "to", "bezier_to"):
             with command:
                 command[1] = target_x
                 command[2] = target_y

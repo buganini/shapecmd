@@ -14,5 +14,5 @@
 - ArcRad: angle, radius, span_radian, direction (CW/CCW)
 - Turn: angle, distance
 - To: x, y
-- BezierTo: x, y
+- BezierTo: x, y (終點；控制點依前一段方向自動計算)
 - ToShape: name
