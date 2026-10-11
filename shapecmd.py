@@ -6,7 +6,7 @@ from xml.sax.saxutils import quoteattr
 
 import PUI
 
-MINIMUM_PUI_VERSION = (0, 50)
+MINIMUM_PUI_VERSION = (0, 51)
 installed_pui_version = tuple(int(part) for part in PUI.__version__.split("."))
 if installed_pui_version < MINIMUM_PUI_VERSION:
     required_version = ".".join(str(part) for part in MINIMUM_PUI_VERSION)
@@ -1379,14 +1379,14 @@ class ShapeCmd(Application):
         resolving = set() if resolving is None else set(resolving)
         commands_identity = id(commands)
         if commands_identity in resolving:
-            return {"points": [], "handles": []}
+            return {"points": [], "handles": [], "beziers": []}
         resolving.add(commands_identity)
 
         try:
             current_x = float(commands[0][1])
             current_y = float(commands[0][2])
         except (IndexError, TypeError, ValueError):
-            return {"points": [], "handles": []}
+            return {"points": [], "handles": [], "beziers": []}
 
         start_point = (current_x, current_y)
         points = [start_point]
@@ -1399,6 +1399,7 @@ class ShapeCmd(Application):
             }
         ]
         previous_endpoint_handle = handles[0]
+        beziers = []
         heading = 0.0
         endpoint_index = 0
 
@@ -1473,6 +1474,7 @@ class ShapeCmd(Application):
                             next_y - math.sin(end_heading) * control_distance
                         )
 
+                        sample_points = [(start_x, start_y)]
                         for segment_index in range(1, self.BEZIER_SEGMENTS + 1):
                             t = segment_index / self.BEZIER_SEGMENTS
                             inverse_t = 1 - t
@@ -1489,6 +1491,17 @@ class ShapeCmd(Application):
                                 + t**3 * next_y
                             )
                             points.append((current_x, current_y))
+                            sample_points.append((current_x, current_y))
+
+                        beziers.append(
+                            {
+                                "start": (start_x, start_y),
+                                "control1": (control1_x, control1_y),
+                                "control2": (control2_x, control2_y),
+                                "end": (next_x, next_y),
+                                "samples": sample_points,
+                            }
+                        )
 
                         heading = end_heading
                     else:
@@ -1842,7 +1855,11 @@ class ShapeCmd(Application):
             handles,
             closed,
         )
-        return {"points": points, "handles": handles}
+        return {
+            "points": points,
+            "handles": handles,
+            "beziers": beziers,
+        }
 
     def path_points(self, commands, closed=False):
         return self.path_geometry(commands, closed=closed)["points"]
@@ -1910,6 +1927,61 @@ class ShapeCmd(Application):
                 width=2,
             )
 
+    @staticmethod
+    def bezier_edges(beziers):
+        first_edges = {}
+        all_edges = set()
+        for bezier in beziers:
+            edges = list(zip(bezier["samples"], bezier["samples"][1:]))
+            if not edges:
+                continue
+            first_edges[edges[0]] = bezier
+            all_edges.update(edges)
+        return first_edges, all_edges
+
+    def draw_path_strokes(self, canvas, points, beziers, color):
+        _, bezier_edges = self.bezier_edges(beziers)
+        line_run = []
+        for start, end in zip(points, points[1:]):
+            if (start, end) in bezier_edges:
+                if len(line_run) > 1:
+                    canvas.drawPolyline(
+                        [self.world_to_canvas(*point) for point in line_run],
+                        color=color,
+                        width=2,
+                    )
+                line_run = []
+                continue
+
+            if not line_run:
+                line_run = [start]
+            elif line_run[-1] != start:
+                if len(line_run) > 1:
+                    canvas.drawPolyline(
+                        [self.world_to_canvas(*point) for point in line_run],
+                        color=color,
+                        width=2,
+                    )
+                line_run = [start]
+            line_run.append(end)
+
+        if len(line_run) > 1:
+            canvas.drawPolyline(
+                [self.world_to_canvas(*point) for point in line_run],
+                color=color,
+                width=2,
+            )
+
+        for bezier in beziers:
+            canvas.drawCubicBezier(
+                self.world_to_canvas(*bezier["start"]),
+                self.world_to_canvas(*bezier["control1"]),
+                self.world_to_canvas(*bezier["control2"]),
+                self.world_to_canvas(*bezier["end"]),
+                color=color,
+                width=2,
+            )
+
     def draw_path(self, canvas, commands, closed=False):
         geometry = self.path_geometry(commands, closed=closed)
         points = geometry["points"]
@@ -1924,7 +1996,12 @@ class ShapeCmd(Application):
                 fill=color,
             )
         elif len(canvas_points) > 1:
-            canvas.drawPolyline(canvas_points, color=color, width=2)
+            self.draw_path_strokes(
+                canvas,
+                points,
+                geometry["beziers"],
+                color,
+            )
 
         if not focused:
             return
@@ -3208,7 +3285,7 @@ class ShapeCmd(Application):
             value = 0
         return f"{value:.2f}".rstrip("0").rstrip(".")
 
-    def svg_path(self, points, closed, color):
+    def svg_path(self, points, closed, color, beziers=()):
         if not points:
             return None
         if len(points) == 1:
@@ -3223,14 +3300,31 @@ class ShapeCmd(Application):
         path_points = list(points)
         if closed and path_points[-1] == path_points[0]:
             path_points.pop()
-        coordinates = " ".join(
-            (
-                f"M {self.svg_number(point_x)} {self.svg_number(point_y)}"
-                if index == 0
-                else f"L {self.svg_number(point_x)} {self.svg_number(point_y)}"
-            )
-            for index, (point_x, point_y) in enumerate(path_points)
-        )
+        first_bezier_edges, all_bezier_edges = self.bezier_edges(beziers)
+        start_x, start_y = path_points[0]
+        path_commands = [
+            f"M {self.svg_number(start_x)} {self.svg_number(start_y)}"
+        ]
+        for start, end in zip(path_points, path_points[1:]):
+            edge = (start, end)
+            bezier = first_bezier_edges.get(edge)
+            if bezier is not None:
+                control1_x, control1_y = bezier["control1"]
+                control2_x, control2_y = bezier["control2"]
+                end_x, end_y = bezier["end"]
+                path_commands.append(
+                    f"C {self.svg_number(control1_x)} "
+                    f"{self.svg_number(control1_y)} "
+                    f"{self.svg_number(control2_x)} "
+                    f"{self.svg_number(control2_y)} "
+                    f"{self.svg_number(end_x)} {self.svg_number(end_y)}"
+                )
+            elif edge not in all_bezier_edges:
+                end_x, end_y = end
+                path_commands.append(
+                    f"L {self.svg_number(end_x)} {self.svg_number(end_y)}"
+                )
+        coordinates = " ".join(path_commands)
         close_command = " Z" if closed else ""
         return (
             f'<path d="{coordinates}{close_command}" fill="none" '
@@ -3281,6 +3375,7 @@ class ShapeCmd(Application):
                     geometry["points"],
                     command_name == "ClosedPath",
                     "#0F766E",
+                    geometry["beziers"],
                 )
             else:
                 geometry = self.standalone_geometry(command)

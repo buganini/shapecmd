@@ -1,2 +1,2 @@
 PySide6_Essentials
-QPUIQ>=0.50
+QPUIQ>=0.51

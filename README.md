@@ -91,6 +91,11 @@ angular span in radians is calculated as `arcLength / radius`. `ArcTo` derives
 its center from the start, fixed endpoint, radius, direction, and `largeArc`;
 the minimum radius produces a semicircle.
 
+Bézier commands are rendered as native cubic curves through PUI's
+`Canvas.drawCubicBezier()`, and SVG export uses the `C` path command. A
+32-segment sample is retained only for hit testing, bounds, direction arrows,
+and other geometric calculations.
+
 Radius parameters and `arcLength` default to `50`. Degree-based arc spans
 default to `30`.
 
