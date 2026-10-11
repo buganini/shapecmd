@@ -200,6 +200,7 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
+        self.drag_arc_state = None
         self.placement_command = None
         self.placement_commands = None
         self.placement_remove_on_cancel = False
@@ -1065,6 +1066,11 @@ class ShapeCmd(Application):
                         heading = angle + span + (
                             math.pi / 2 if span > 0 else -math.pi / 2
                         )
+                    arc_mid_angle = angle + span / 2
+                    arc_midpoint = (
+                        center_x + math.cos(arc_mid_angle) * radius,
+                        center_y + math.sin(arc_mid_angle) * radius,
+                    )
                     handles.extend(
                         [
                             {
@@ -1082,6 +1088,20 @@ class ShapeCmd(Application):
                                 ),
                                 "start": arc_start,
                                 "angle": angle,
+                            },
+                            {
+                                "kind": "arc_mid_radius",
+                                "command": command,
+                                "point": (
+                                    (arc_midpoint[0] + center_x) / 2,
+                                    (arc_midpoint[1] + center_y) / 2,
+                                ),
+                                "start": arc_start,
+                                "target": (current_x, current_y),
+                                "center": (center_x, center_y),
+                                "midpoint": arc_midpoint,
+                                "span": span,
+                                "direction": direction,
                             },
                             {
                                 "kind": "arc_end",
@@ -1205,6 +1225,18 @@ class ShapeCmd(Application):
                     center_y,
                     point_x,
                     point_y,
+                    color=0xFBBF24,
+                )
+            elif handle["kind"] == "arc_mid_radius":
+                center_x, center_y = self.world_to_canvas(*handle["center"])
+                midpoint_x, midpoint_y = self.world_to_canvas(
+                    *handle["midpoint"]
+                )
+                canvas.drawLine(
+                    center_x,
+                    center_y,
+                    midpoint_x,
+                    midpoint_y,
                     color=0xFBBF24,
                 )
 
@@ -1568,6 +1600,8 @@ class ShapeCmd(Application):
             )
             with command:
                 command[2] = round(max(0, projected_half_radius * 2), 2)
+        elif kind == "arc_mid_radius":
+            self.drag_path_arc_mid_radius(command, target_x, target_y)
         elif kind == "arc_end":
             center_x, center_y = handle["center"]
             end_angle = math.atan2(target_y - center_y, target_x - center_x)
@@ -1587,6 +1621,99 @@ class ShapeCmd(Application):
                 )
                 if len(command) < 5:
                     command.append(direction)
+
+    def drag_path_arc_mid_radius(self, command, target_x, target_y):
+        state = self.drag_arc_state
+        if state is None:
+            return
+
+        start_x, start_y = state["start"]
+        end_x, end_y = state["target"]
+        old_center_x, old_center_y = state["center"]
+        midpoint_x, midpoint_y = state["midpoint"]
+        radial_x = midpoint_x - old_center_x
+        radial_y = midpoint_y - old_center_y
+        old_radius = math.hypot(radial_x, radial_y)
+        if old_radius <= 1e-9:
+            return
+
+        radial_unit_x = radial_x / old_radius
+        radial_unit_y = radial_y / old_radius
+        signed_half_radius = (
+            (target_x - old_center_x) * radial_unit_x
+            + (target_y - old_center_y) * radial_unit_y
+        )
+        flipped = signed_half_radius < 0
+        direction = state["direction"]
+        if flipped:
+            direction = "CW" if direction == "CCW" else "CCW"
+        radius = abs(signed_half_radius) * 2
+
+        chord_x = end_x - start_x
+        chord_y = end_y - start_y
+        chord_length = math.hypot(chord_x, chord_y)
+        old_span = abs(state["span"])
+
+        if chord_length <= 1e-9:
+            start_unit_x = (start_x - old_center_x) / old_radius
+            start_unit_y = (start_y - old_center_y) / old_radius
+            start_angle = math.atan2(start_unit_y, start_unit_x)
+        else:
+            chord_unit_x = chord_x / chord_length
+            chord_unit_y = chord_y / chord_length
+            normal_x = -chord_unit_y
+            normal_y = chord_unit_x
+            chord_mid_x = (start_x + end_x) / 2
+            chord_mid_y = (start_y + end_y) / 2
+            half_chord = chord_length / 2
+            radius = max(radius, half_chord)
+            center_distance = math.sqrt(
+                max(0, radius * radius - half_chord * half_chord)
+            )
+            centers = (
+                (
+                    chord_mid_x + normal_x * center_distance,
+                    chord_mid_y + normal_y * center_distance,
+                ),
+                (
+                    chord_mid_x - normal_x * center_distance,
+                    chord_mid_y - normal_y * center_distance,
+                ),
+            )
+            distance_key = lambda center: math.hypot(
+                center[0] - old_center_x,
+                center[1] - old_center_y,
+            )
+            center_x, center_y = (
+                max(centers, key=distance_key)
+                if flipped
+                else min(centers, key=distance_key)
+            )
+            start_angle = math.atan2(start_y - center_y, start_x - center_x)
+            end_angle = math.atan2(end_y - center_y, end_x - center_x)
+            if direction == "CW":
+                span = (start_angle - end_angle) % (2 * math.pi)
+            else:
+                span = (end_angle - start_angle) % (2 * math.pi)
+            full_turns = max(
+                0,
+                round((old_span - span) / (2 * math.pi)),
+            )
+            old_span = span + full_turns * 2 * math.pi
+
+        with command:
+            command[1] = round(math.degrees(start_angle), 2)
+            command[2] = round(radius, 2)
+            command[3] = round(
+                math.degrees(old_span)
+                if command[0] == "ArcDegree"
+                else old_span * radius,
+                2,
+            )
+            if len(command) < 5:
+                command.append(direction)
+            else:
+                command[4] = direction
 
     def paint_canvas(self, canvas):
         self.update_canvas_size(canvas.width, canvas.height)
@@ -1640,12 +1767,14 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
+        self.drag_arc_state = None
         self.redraw()
 
     def canvas_mousedown(self, event):
         if event.button not in (MouseButton.LEFT, MouseButton.MIDDLE):
             return
         self.cursor_position = (event.x, event.y)
+        self.drag_arc_state = None
 
         if self.view_origin is None:
             return
@@ -1695,6 +1824,8 @@ class ShapeCmd(Application):
                 )
                 self.drag_offset = (handle_x - world_x, handle_y - world_y)
                 self.drag_position = (world_x, world_y)
+                if path_handle["kind"] == "arc_mid_radius":
+                    self.drag_arc_state = dict(path_handle)
                 return
 
             path_commands = self.path_at(event.x, event.y)
@@ -1741,6 +1872,7 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
+        self.drag_arc_state = None
         self.cursor_position = (event.x, event.y)
         self.redraw()
 
@@ -1981,6 +2113,7 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
+        self.drag_arc_state = None
         if self.cursor_position is not None:
             self.move_placement_to_canvas(*self.cursor_position)
         self.redraw()

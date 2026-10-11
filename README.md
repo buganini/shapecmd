@@ -135,6 +135,8 @@ segments.
 - `RegularPolygon`: center and first vertex. The vertex controls both the radius
   and `rotateDeg`.
 - `Path` and `ClosedPath`: starting point and editable command endpoints.
-- Path arcs: center, endpoint, and an `R/2` radius handle on the start side.
+- Path arcs: center, endpoint, the original `R/2` radius handle on the start
+  side, and a second radius handle halfway from the center to the arc midpoint.
+  Dragging the midpoint handle preserves the arc endpoint.
 - `ToShape` and `ToShapeEdge`: dragging the derived endpoint moves the referenced
   target shape.
