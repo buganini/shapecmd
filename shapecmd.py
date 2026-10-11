@@ -311,6 +311,12 @@ class ShapeCmd(Application):
     def parameter_label(value):
         return "".join(part.capitalize() for part in value.split("_"))
 
+    def shape_is_focused(self, shape):
+        commands = shape["commands"]
+        if commands is self.focused_path_commands:
+            return True
+        return any(command is self.focused_command for command in commands)
+
     def normalize_all_commands(self):
         for shape in self.state.shapes:
             commands = shape.get("commands", [])
@@ -399,6 +405,10 @@ class ShapeCmd(Application):
                     with Scroll():
                         with VBox():
                             for shape_idx, shape in enumerate(self.state.shapes):
+                                show_parameters = (
+                                    self.state.shape_expanded[shape_idx]
+                                    or self.shape_is_focused(shape)
+                                )
                                 with HBox().id(f"{shape_idx}"):
                                     Label("Name")
                                     TextField(shape("name"))
@@ -408,7 +418,7 @@ class ShapeCmd(Application):
                                         else "Show"
                                     ).click(self.toggle_shape, shape_idx)
 
-                                if self.state.shape_expanded[shape_idx]:
+                                if show_parameters:
                                     commands = shape["commands"]
                                     is_path = bool(
                                         commands
@@ -2793,7 +2803,7 @@ class ShapeCmd(Application):
             },
             deep=True,
         )
-        self.state.shape_expanded.append(False)
+        self.state.shape_expanded.append(True)
         self.state.shapes.append(shape)
         command = shape["commands"][0]
         self.focused_command = command
