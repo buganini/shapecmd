@@ -40,6 +40,10 @@ class ShapeCmd(Application):
     SHAPE_HIT_MARGIN = 6
     ARC_SEGMENT_DEGREES = 5
     FIT_PADDING = 100
+    PATH_ARROW_SPACING = 80
+    PATH_ARROW_LENGTH = 10
+    PATH_ARROW_WIDTH = 8
+    MAX_PATH_ARROWS = 200
 
     START_COMMANDS = (
         "Point",
@@ -448,6 +452,69 @@ class ShapeCmd(Application):
     def path_points(self, commands, closed=False):
         return self.path_geometry(commands, closed=closed)["points"]
 
+    def draw_path_direction_arrows(self, canvas, points, color):
+        segments = []
+        total_length = 0.0
+        for start, end in zip(points, points[1:]):
+            delta_x = end[0] - start[0]
+            delta_y = end[1] - start[1]
+            length = math.hypot(delta_x, delta_y)
+            if not length:
+                continue
+            segments.append((start, delta_x, delta_y, length, total_length))
+            total_length += length
+
+        if not segments:
+            return
+
+        arrow_count = max(
+            1,
+            min(self.MAX_PATH_ARROWS, int(total_length / self.PATH_ARROW_SPACING)),
+        )
+        arrow_step = total_length / arrow_count
+        targets = [(index + 0.5) * arrow_step for index in range(arrow_count)]
+        segment_index = 0
+
+        for target in targets:
+            while (
+                segment_index + 1 < len(segments)
+                and target
+                > segments[segment_index][4] + segments[segment_index][3]
+            ):
+                segment_index += 1
+
+            start, delta_x, delta_y, length, offset = segments[segment_index]
+            distance = target - offset
+            unit_x = delta_x / length
+            unit_y = delta_y / length
+            center_x = start[0] + unit_x * distance
+            center_y = start[1] + unit_y * distance
+            half_length = self.PATH_ARROW_LENGTH / 2
+            half_width = self.PATH_ARROW_WIDTH / 2
+            tip_x = center_x + unit_x * half_length
+            tip_y = center_y + unit_y * half_length
+            back_x = center_x - unit_x * half_length
+            back_y = center_y - unit_y * half_length
+            perpendicular_x = -unit_y
+            perpendicular_y = unit_x
+
+            canvas.drawLine(
+                tip_x,
+                tip_y,
+                back_x + perpendicular_x * half_width,
+                back_y + perpendicular_y * half_width,
+                color=color,
+                width=2,
+            )
+            canvas.drawLine(
+                tip_x,
+                tip_y,
+                back_x - perpendicular_x * half_width,
+                back_y - perpendicular_y * half_width,
+                color=color,
+                width=2,
+            )
+
     def draw_path(self, canvas, commands, closed=False):
         geometry = self.path_geometry(commands, closed=closed)
         points = geometry["points"]
@@ -466,6 +533,8 @@ class ShapeCmd(Application):
 
         if not focused:
             return
+
+        self.draw_path_direction_arrows(canvas, canvas_points, color)
 
         for handle in geometry["handles"]:
             point_x, point_y = self.world_to_canvas(*handle["point"])
