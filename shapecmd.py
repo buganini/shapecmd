@@ -91,6 +91,7 @@ class ShapeCmd(Application):
     DEFAULT_ARC_SPAN_DEGREES = 30
     DEFAULT_ARC_LENGTH = 50
     ROTATION_HANDLE_OFFSET = 20
+    ARC_TO_RADIUS_HANDLE_OFFSET = 20
     SVG_PADDING = 10
     SVG_POINT_RADIUS = 2
     DIRECT_POSITION_COMMANDS = {
@@ -104,6 +105,7 @@ class ShapeCmd(Application):
         "ClosedPath",
         "To",
         "BezierTo",
+        "ArcTo",
     }
     HANDLE_TOOLTIPS = {
         "center": "Center",
@@ -126,8 +128,9 @@ class ShapeCmd(Application):
         "turn": "Turn angle and distance",
         "arc_center": "Arc center and radius",
         "arc_radius": "Arc radius",
-        "arc_mid_radius": "Arc radius (fixed endpoint)",
         "arc_end": "Arc endpoint",
+        "arc_to": "ArcTo endpoint",
+        "arc_to_radius": "ArcTo radius",
         "segment_midpoint": "Move both endpoints",
     }
 
@@ -144,6 +147,7 @@ class ShapeCmd(Application):
     NEXT_COMMANDS = (
         "ArcDegree",
         "ArcLength",
+        "ArcTo",
         "Turn",
         "To",
         "BezierTo",
@@ -200,6 +204,12 @@ class ShapeCmd(Application):
             ("arc_length", DEFAULT_ARC_LENGTH),
             ("direction", "CCW"),
         ),
+        "ArcTo": (
+            ("x", 0),
+            ("y", 0),
+            ("radius", DEFAULT_RADIUS),
+            ("direction", "CCW"),
+        ),
         "Turn": (("angle", 0), ("distance", 0)),
         "To": (("x", 0), ("y", 0)),
         "BezierTo": (("x", 0), ("y", 0)),
@@ -226,12 +236,12 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
-        self.drag_arc_state = None
         self.placement_command = None
         self.placement_commands = None
         self.placement_remove_on_cancel = False
         self.cursor_position = None
         self.handle_tooltip = None
+        self.normalize_all_commands()
 
     @staticmethod
     def load_shapes(input_path):
@@ -262,6 +272,59 @@ class ShapeCmd(Application):
     @staticmethod
     def parameter_label(value):
         return "".join(part.capitalize() for part in value.split("_"))
+
+    def normalize_all_commands(self):
+        for shape in self.state.shapes:
+            commands = shape.get("commands", [])
+            for command in commands:
+                self.normalize_command(command, commands)
+
+    @staticmethod
+    def arc_to_minimum_radius(start, target):
+        radius = math.hypot(target[0] - start[0], target[1] - start[1]) / 2
+        return math.ceil(radius * 100 - 1e-9) / 100
+
+    def normalize_command(self, command, commands=None):
+        if not command:
+            return
+
+        command_name = command[0]
+        if command_name == "RegularPolygon" and len(command) >= 5:
+            try:
+                sides = max(3, min(1000, int(command[4])))
+            except (TypeError, ValueError):
+                sides = 3
+            with command:
+                command[4] = sides
+            return
+
+        if command_name != "ArcTo" or commands is None or len(command) < 4:
+            return
+
+        geometry = self.path_geometry(commands, closed=False)
+        endpoint_handle = next(
+            (
+                handle
+                for handle in geometry["handles"]
+                if handle["command"] is command and handle["kind"] == "arc_to"
+            ),
+            None,
+        )
+        if endpoint_handle is None:
+            return
+
+        start_x, start_y = endpoint_handle["start"]
+        target_x, target_y = endpoint_handle["point"]
+        minimum_radius = self.arc_to_minimum_radius(
+            (start_x, start_y),
+            (target_x, target_y),
+        )
+        try:
+            radius = abs(float(command[3]))
+        except (TypeError, ValueError):
+            radius = minimum_radius
+        with command:
+            command[3] = max(round(radius, 2), minimum_radius)
 
     def content(self):
         with Window(title="ShapeCmd", maximize=True).keypress(
@@ -382,6 +445,8 @@ class ShapeCmd(Application):
                                                         ).set(
                                                             self.table_argument_changed,
                                                             argument,
+                                                            cmd,
+                                                            commands,
                                                         )
                                                     )
 
@@ -851,7 +916,8 @@ class ShapeCmd(Application):
             [
                 command
                 for index, command in enumerate(commands)
-                if index == 0 or (command and command[0] in ("To", "BezierTo"))
+                if index == 0
+                or (command and command[0] in ("To", "BezierTo", "ArcTo"))
             ]
             if is_path
             else [first_command]
@@ -1093,6 +1159,109 @@ class ShapeCmd(Application):
                         }
                     )
 
+                elif command_name == "ArcTo" and len(command) >= 4:
+                    arc_start = (current_x, current_y)
+                    next_x = float(command[1])
+                    next_y = float(command[2])
+                    chord_x = next_x - current_x
+                    chord_y = next_y - current_y
+                    chord_length = math.hypot(chord_x, chord_y)
+                    radius = max(abs(float(command[3])), chord_length / 2)
+                    direction = (
+                        str(command[4]).upper() if len(command) >= 5 else "CCW"
+                    )
+                    if direction not in ("CW", "CCW"):
+                        direction = "CCW"
+
+                    if chord_length:
+                        half_chord = chord_length / 2
+                        normal_x = -chord_y / chord_length
+                        normal_y = chord_x / chord_length
+                        direction_sign = 1 if direction == "CCW" else -1
+                        center_distance = direction_sign * math.sqrt(
+                            max(0, radius * radius - half_chord * half_chord)
+                        )
+                        chord_mid_x = (current_x + next_x) / 2
+                        chord_mid_y = (current_y + next_y) / 2
+                        center_x = chord_mid_x + normal_x * center_distance
+                        center_y = chord_mid_y + normal_y * center_distance
+                        start_angle = math.atan2(
+                            current_y - center_y,
+                            current_x - center_x,
+                        )
+                        end_angle = math.atan2(
+                            next_y - center_y,
+                            next_x - center_x,
+                        )
+                        if direction == "CW":
+                            span = -((start_angle - end_angle) % (2 * math.pi))
+                        else:
+                            span = (end_angle - start_angle) % (2 * math.pi)
+                        segment_count = min(
+                            720,
+                            max(
+                                1,
+                                math.ceil(
+                                    abs(math.degrees(span))
+                                    / self.ARC_SEGMENT_DEGREES
+                                ),
+                            ),
+                        )
+                        for segment_index in range(1, segment_count + 1):
+                            segment_angle = (
+                                start_angle
+                                + span * segment_index / segment_count
+                            )
+                            current_x = center_x + math.cos(segment_angle) * radius
+                            current_y = center_y + math.sin(segment_angle) * radius
+                            points.append((current_x, current_y))
+                        current_x, current_y = next_x, next_y
+                        points[-1] = (current_x, current_y)
+
+                        heading = end_angle + (
+                            math.pi / 2 if direction == "CCW" else -math.pi / 2
+                        )
+                        arc_mid_angle = start_angle + span / 2
+                        arc_midpoint = (
+                            center_x + math.cos(arc_mid_angle) * radius,
+                            center_y + math.sin(arc_mid_angle) * radius,
+                        )
+                        handle_offset = self.ARC_TO_RADIUS_HANDLE_OFFSET / max(
+                            abs(getattr(self, "zoom", 1.0)),
+                            self.MIN_ZOOM,
+                        )
+                        radial_unit_x = (arc_midpoint[0] - center_x) / radius
+                        radial_unit_y = (arc_midpoint[1] - center_y) / radius
+                        handles.append(
+                            {
+                                "kind": "arc_to_radius",
+                                "command": command,
+                                "point": (
+                                    arc_midpoint[0]
+                                    - radial_unit_x * handle_offset,
+                                    arc_midpoint[1]
+                                    - radial_unit_y * handle_offset,
+                                ),
+                                "start": arc_start,
+                                "target": (next_x, next_y),
+                                "center": (center_x, center_y),
+                                "midpoint": arc_midpoint,
+                                "handle_offset": handle_offset,
+                                "direction": direction,
+                            }
+                        )
+                    else:
+                        current_x, current_y = next_x, next_y
+
+                    handles.append(
+                        {
+                            "kind": "arc_to",
+                            "command": command,
+                            "point": (current_x, current_y),
+                            "start": arc_start,
+                        }
+                    )
+
                 elif command_name in ("ArcDegree", "ArcLength") and len(command) >= 4:
                     arc_start = (current_x, current_y)
                     angle = float(command[1])
@@ -1132,11 +1301,6 @@ class ShapeCmd(Application):
                         heading = angle + span + (
                             math.pi / 2 if span > 0 else -math.pi / 2
                         )
-                    arc_mid_angle = angle + span / 2
-                    arc_midpoint = (
-                        center_x + math.cos(arc_mid_angle) * radius,
-                        center_y + math.sin(arc_mid_angle) * radius,
-                    )
                     handles.extend(
                         [
                             {
@@ -1154,20 +1318,6 @@ class ShapeCmd(Application):
                                 ),
                                 "start": arc_start,
                                 "angle": angle,
-                            },
-                            {
-                                "kind": "arc_mid_radius",
-                                "command": command,
-                                "point": (
-                                    (arc_midpoint[0] + center_x) / 2,
-                                    (arc_midpoint[1] + center_y) / 2,
-                                ),
-                                "start": arc_start,
-                                "target": (current_x, current_y),
-                                "center": (center_x, center_y),
-                                "midpoint": arc_midpoint,
-                                "span": span,
-                                "direction": direction,
                             },
                             {
                                 "kind": "arc_end",
@@ -1197,6 +1347,7 @@ class ShapeCmd(Application):
                         "to_shape",
                         "to_shape_edge",
                         "turn",
+                        "arc_to",
                         "arc_end",
                     }
                 ),
@@ -1348,16 +1499,15 @@ class ShapeCmd(Application):
                     point_y,
                     color=0xFBBF24,
                 )
-            elif handle["kind"] == "arc_mid_radius":
-                center_x, center_y = self.world_to_canvas(*handle["center"])
+            elif handle["kind"] == "arc_to_radius":
                 midpoint_x, midpoint_y = self.world_to_canvas(
                     *handle["midpoint"]
                 )
                 canvas.drawLine(
-                    center_x,
-                    center_y,
                     midpoint_x,
                     midpoint_y,
+                    point_x,
+                    point_y,
                     color=0xFBBF24,
                 )
 
@@ -1677,10 +1827,12 @@ class ShapeCmd(Application):
         command = handle["command"]
         kind = handle["kind"]
 
-        if kind in ("path_start", "to", "bezier_to"):
+        if kind in ("path_start", "to", "bezier_to", "arc_to"):
             with command:
                 command[1] = round(target_x, 2)
                 command[2] = round(target_y, 2)
+            if kind == "arc_to":
+                self.normalize_command(command, self.focused_path_commands)
             return
 
         if kind == "turn":
@@ -1804,10 +1956,8 @@ class ShapeCmd(Application):
             delta_y = world_y - self.drag_position[1]
             self.translate_shape(target_shape, delta_x, delta_y)
             self.drag_position = (world_x, world_y)
-        elif kind in ("path_start", "to", "bezier_to"):
-            with command:
-                command[1] = round(target_x, 2)
-                command[2] = round(target_y, 2)
+        elif kind in ("path_start", "to", "bezier_to", "arc_to"):
+            self.move_path_endpoint_to(handle, target_x, target_y)
         elif kind == "turn":
             origin_x, origin_y = handle["origin"]
             delta_x = target_x - origin_x
@@ -1843,8 +1993,8 @@ class ShapeCmd(Application):
             )
             with command:
                 command[2] = round(max(0, projected_half_radius * 2), 2)
-        elif kind == "arc_mid_radius":
-            self.drag_path_arc_mid_radius(command, target_x, target_y)
+        elif kind == "arc_to_radius":
+            self.drag_arc_to_radius(handle, target_x, target_y)
         elif kind == "arc_end":
             center_x, center_y = handle["center"]
             end_angle = math.atan2(target_y - center_y, target_x - center_x)
@@ -1865,102 +2015,36 @@ class ShapeCmd(Application):
                 if len(command) < 5:
                     command.append(direction)
 
-    def drag_path_arc_mid_radius(self, command, target_x, target_y):
-        state = self.drag_arc_state
-        if state is None:
-            return
-
-        start_x, start_y = state["start"]
-        end_x, end_y = state["target"]
-        old_center_x, old_center_y = state["center"]
-        midpoint_x, midpoint_y = state["midpoint"]
-        radial_x = midpoint_x - old_center_x
-        radial_y = midpoint_y - old_center_y
-        old_radius = math.hypot(radial_x, radial_y)
-        if old_radius <= 1e-9:
-            return
-
-        radial_unit_x = radial_x / old_radius
-        radial_unit_y = radial_y / old_radius
-        direction = state["direction"]
-
+    def drag_arc_to_radius(self, handle, target_x, target_y):
+        start_x, start_y = handle["start"]
+        end_x, end_y = handle["target"]
         chord_x = end_x - start_x
         chord_y = end_y - start_y
         chord_length = math.hypot(chord_x, chord_y)
-        old_span = abs(state["span"])
-
         if chord_length <= 1e-9:
-            signed_half_radius = (
-                (target_x - old_center_x) * radial_unit_x
-                + (target_y - old_center_y) * radial_unit_y
-            )
-            if signed_half_radius < 0:
-                direction = "CW" if direction == "CCW" else "CCW"
-            radius = abs(signed_half_radius) * 2
-            start_unit_x = (start_x - old_center_x) / old_radius
-            start_unit_y = (start_y - old_center_y) / old_radius
-            start_angle = math.atan2(start_unit_y, start_unit_x)
-        else:
-            chord_unit_x = chord_x / chord_length
-            chord_unit_y = chord_y / chord_length
-            normal_x = -chord_unit_y
-            normal_y = chord_unit_x
-            chord_mid_x = (start_x + end_x) / 2
-            chord_mid_y = (start_y + end_y) / 2
-            half_chord = chord_length / 2
-            original_handle_distance = (
-                (state["point"][0] - chord_mid_x) * normal_x
-                + (state["point"][1] - chord_mid_y) * normal_y
-            )
-            handle_distance = (
-                (target_x - chord_mid_x) * normal_x
-                + (target_y - chord_mid_y) * normal_y
-            )
-            midpoint_side = (
-                (midpoint_x - old_center_x) * normal_x
-                + (midpoint_y - old_center_y) * normal_y
-            )
-            arc_side = 1 if midpoint_side >= 0 else -1
-            crossed = original_handle_distance * handle_distance < 0
-            if crossed:
-                arc_side *= -1
-                direction = "CW" if direction == "CCW" else "CCW"
-            center_distance = (
-                4 * handle_distance
-                - arc_side
-                * math.sqrt(
-                    4 * handle_distance * handle_distance
-                    + 3 * half_chord * half_chord
-                )
-            ) / 3
-            center_x = chord_mid_x + normal_x * center_distance
-            center_y = chord_mid_y + normal_y * center_distance
-            radius = math.hypot(half_chord, center_distance)
-            start_angle = math.atan2(start_y - center_y, start_x - center_x)
-            end_angle = math.atan2(end_y - center_y, end_x - center_x)
-            if direction == "CW":
-                span = (start_angle - end_angle) % (2 * math.pi)
-            else:
-                span = (end_angle - start_angle) % (2 * math.pi)
-            full_turns = max(
-                0,
-                round((old_span - span) / (2 * math.pi)),
-            )
-            old_span = span + full_turns * 2 * math.pi
+            return
 
+        half_chord = chord_length / 2
+        normal_x = -chord_y / chord_length
+        normal_y = chord_x / chord_length
+        chord_mid_x = (start_x + end_x) / 2
+        chord_mid_y = (start_y + end_y) / 2
+        direction_sign = 1 if handle["direction"] == "CCW" else -1
+        handle_distance = (
+            (target_x - chord_mid_x) * normal_x
+            + (target_y - chord_mid_y) * normal_y
+        )
+        sagitta = handle["handle_offset"] - direction_sign * handle_distance
+        minimum_sagitta = max(1e-6, half_chord * 1e-6)
+        sagitta = min(half_chord, max(minimum_sagitta, sagitta))
+        radius = (
+            half_chord * half_chord + sagitta * sagitta
+        ) / (2 * sagitta)
+
+        command = handle["command"]
         with command:
-            command[1] = round(math.degrees(start_angle), 2)
-            command[2] = round(radius, 2)
-            command[3] = round(
-                math.degrees(old_span)
-                if command[0] == "ArcDegree"
-                else old_span * radius,
-                2,
-            )
-            if len(command) < 5:
-                command.append(direction)
-            else:
-                command[4] = direction
+            command[3] = round(radius, 2)
+        self.normalize_command(command, self.focused_path_commands)
 
     def paint_canvas(self, canvas):
         self.update_canvas_size(canvas.width, canvas.height)
@@ -2059,7 +2143,6 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
-        self.drag_arc_state = None
         self.redraw()
 
     def canvas_mousedown(self, event):
@@ -2068,7 +2151,6 @@ class ShapeCmd(Application):
         self.hide_handle_tooltip()
         self.redraw()
         self.cursor_position = (event.x, event.y)
-        self.drag_arc_state = None
 
         if self.view_origin is None:
             return
@@ -2118,8 +2200,6 @@ class ShapeCmd(Application):
                 )
                 self.drag_offset = (handle_x - world_x, handle_y - world_y)
                 self.drag_position = (world_x, world_y)
-                if path_handle["kind"] == "arc_mid_radius":
-                    self.drag_arc_state = dict(path_handle)
                 return
 
             path_commands = self.path_at(event.x, event.y)
@@ -2166,7 +2246,6 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
-        self.drag_arc_state = None
         self.cursor_position = (event.x, event.y)
         self.update_handle_tooltip(event.x, event.y)
         self.redraw()
@@ -2385,6 +2464,7 @@ class ShapeCmd(Application):
             with command:
                 command[1] = round(world_x, 2)
                 command[2] = round(world_y, 2)
+            self.normalize_command(command, self.placement_commands)
             return
 
         if self.placement_commands is None:
@@ -2468,7 +2548,6 @@ class ShapeCmd(Application):
         self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
-        self.drag_arc_state = None
         if self.cursor_position is not None:
             self.move_placement_to_canvas(*self.cursor_position)
         self.redraw()
@@ -2553,9 +2632,9 @@ class ShapeCmd(Application):
             command[0] = str(value)
         self.command_changed(None, command, shape)
 
-    @staticmethod
-    def table_argument_changed(value, argument):
+    def table_argument_changed(self, value, argument, command, commands):
         argument.value = value
+        self.normalize_command(command, commands)
 
     def add_shape(self, event):
         if self.canvas_size is not None and self.view_origin is not None:

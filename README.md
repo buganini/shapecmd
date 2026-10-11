@@ -59,7 +59,7 @@ The first command of each shape must be one of the following:
 | `Arc` | `centerX, centerY, radius, startAngle, spanDeg, direction` | A standalone arc. `direction` is `CW` or `CCW`. |
 | `Rect` | `x, y, xOffset, yOffset, rotateDeg` | A rectangle defined by an origin and local offsets, rotated around its origin. |
 | `CenterRect` | `centerX, centerY, width, height, rotateDeg` | A rectangle defined by its center and size, rotated around its center. |
-| `RegularPolygon` | `centerX, centerY, radius, sides, rotateDeg` | A regular polygon. Rendering uses a minimum of three sides. |
+| `RegularPolygon` | `centerX, centerY, radius, sides, rotateDeg` | A regular polygon. `sides` is clamped to `3`–`1000`, and the corrected value is written back to the model. |
 | `Path` | `x, y` | The starting point of an open path. |
 | `ClosedPath` | `x, y` | A closed path that automatically returns to its starting point. |
 
@@ -75,13 +75,16 @@ Use `Add Next` to append any of the following commands to a `Path` or
 | `BezierTo` | `x, y` | Draws to the endpoint using cubic Bézier control points calculated from the previous heading. |
 | `ArcDegree` | `angle, radius, spanDeg, direction` | Draws an arc from the current point. The angle and span use degrees. |
 | `ArcLength` | `angle, radius, arcLength, direction` | Draws an arc from the current point with its extent specified as a linear arc length. |
+| `ArcTo` | `x, y, radius, direction` | Draws the minor arc to a fixed endpoint. The radius is clamped to at least half the distance from the start to the endpoint, and the corrected value is written back to the model. |
 | `ToShape` | `name` | Draws to the target shape's reference x/y coordinate. |
 | `ToShapeEdge` | `name` | Draws to the nearest point on the target shape's boundary. |
 
-For `ArcDegree` and `ArcLength`, `angle` is the angle from the inferred center to the
-arc's starting point. The center is calculated from the current path position,
-angle, and radius. `direction` is `CW` or `CCW`. For `ArcLength`, the angular
-span in radians is calculated as `arcLength / radius`.
+For `ArcDegree` and `ArcLength`, `angle` is the angle from the inferred center to
+the arc's starting point. The center is calculated from the current path
+position, angle, and radius. `direction` is `CW` or `CCW`. For `ArcLength`, the
+angular span in radians is calculated as `arcLength / radius`. `ArcTo` derives
+its center from the start, fixed endpoint, radius, and direction; the minimum
+radius produces a semicircle.
 
 Radius parameters and `arcLength` default to `50`. Degree-based arc spans
 default to `30`.
@@ -141,8 +144,10 @@ segments.
   midpoint handle on every segment. Dragging a midpoint translates both
   endpoints of that segment. Handle tooltips use the same zero-based endpoint
   indexes shown in the command table.
-- Path arcs: center, endpoint, the original `R/2` radius handle on the start
-  side, and a second radius handle halfway from the center to the arc midpoint.
-  Dragging the midpoint handle preserves the arc endpoint.
+- `ArcDegree` and `ArcLength`: center, endpoint, and the original `R/2` radius
+  handle on the start side.
+- `ArcTo`: endpoint and a radius handle on a short, fixed-screen-length stem
+  extending from the arc midpoint toward the center. Dragging it preserves
+  both endpoints and direction without displaying the full radius.
 - `ToShape` and `ToShapeEdge`: dragging the derived endpoint moves the referenced
   target shape.
