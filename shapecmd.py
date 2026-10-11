@@ -38,6 +38,8 @@ class ShapeCmd(Application):
     HANDLE_RADIUS = 5
     HANDLE_HIT_RADIUS = 9
     SHAPE_HIT_MARGIN = 6
+    ARC_SEGMENT_DEGREES = 5
+    FIT_PADDING = 100
 
     START_COMMANDS = (
         "Point",
@@ -65,6 +67,7 @@ class ShapeCmd(Application):
             ("center_y", 0),
             ("start_angle", 0),
             ("span_deg", 0),
+            ("direction", "CCW"),
         ),
         "Rect": (("x", 0), ("y", 0), ("x_offset", 0), ("y_offset", 0)),
         "CenterRect": (
@@ -82,8 +85,18 @@ class ShapeCmd(Application):
         ),
         "Path": (("x", 0), ("y", 0)),
         "ClosedPath": (("x", 0), ("y", 0)),
-        "ArcDeg": (("angle", 0), ("span_deg", 0)),
-        "ArcRad": (("angle", 0), ("span_radian", 0)),
+        "ArcDeg": (
+            ("angle", 0),
+            ("radius", 0),
+            ("span_deg", 0),
+            ("direction", "CCW"),
+        ),
+        "ArcRad": (
+            ("angle", 0),
+            ("radius", 0),
+            ("span_radian", 0),
+            ("direction", "CCW"),
+        ),
         "Turn": (("angle", 0), ("distance", 0)),
         "To": (("x", 0), ("y", 0)),
         "BezierTo": (("x", 0), ("y", 0)),
@@ -98,7 +111,9 @@ class ShapeCmd(Application):
         self.view_origin = None
         self.zoom = 1.0
         self.focused_command = None
+        self.focused_path_commands = None
         self.drag_action = None
+        self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
         self.cursor_position = None
@@ -146,7 +161,7 @@ class ShapeCmd(Application):
                         .wheel(self.canvas_wheel)
                     )
 
-                with VBox().layout(width=200):
+                with VBox().layout(width=427):
                     with Scroll():
                         with VBox():
                             for shape_idx, shape in enumerate(self.state.shapes):
@@ -159,30 +174,40 @@ class ShapeCmd(Application):
                                         if cmd_idx == 0
                                         else self.NEXT_COMMANDS
                                     )
-                                    with ComboBox(
-                                        editable=True,
-                                        text_model=cmd(0),
-                                    ).change(self.command_changed, cmd):
-                                        for command_name in command_options:
-                                            ComboBoxItem(command_name)
-
                                     parameters = self.COMMAND_PARAMETERS.get(cmd[0], ())
                                     defaults = (cmd[0],) + tuple(
                                         default for _, default in parameters
                                     )
-                                    for arg_idx, (arg_name, _) in enumerate(
-                                        parameters,
-                                        start=1,
-                                    ):
-                                        with HBox():
+                                    with HBox():
+                                        Label("cmd")
+                                        with ComboBox(
+                                            editable=True,
+                                            text_model=cmd(0),
+                                        ).layout(width=120).change(
+                                            self.command_changed,
+                                            cmd,
+                                        ):
+                                            for command_name in command_options:
+                                                ComboBoxItem(command_name)
+
+                                        for arg_idx, (arg_name, _) in enumerate(
+                                            parameters,
+                                            start=1,
+                                        ):
                                             Label(arg_name)
-                                            TextField(
-                                                ArgumentBinding(
-                                                    cmd,
-                                                    arg_idx,
-                                                    defaults,
-                                                )
-                                            ).layout(weight=1)
+                                            argument = ArgumentBinding(
+                                                cmd,
+                                                arg_idx,
+                                                defaults,
+                                            )
+                                            if arg_name == "direction":
+                                                with ComboBox(
+                                                    text_model=argument,
+                                                ).layout(width=70):
+                                                    ComboBoxItem("CCW")
+                                                    ComboBoxItem("CW")
+                                            else:
+                                                TextField(argument).layout(weight=1)
 
                                 if (
                                     shape["commands"]
@@ -226,6 +251,12 @@ class ShapeCmd(Application):
             command = commands[0]
             if command[0] == "Circle" and len(command) >= 4:
                 self.draw_circle(canvas, command)
+            elif command[0] in ("Path", "ClosedPath") and len(command) >= 3:
+                self.draw_path(
+                    canvas,
+                    commands,
+                    closed=command[0] == "ClosedPath",
+                )
 
     @staticmethod
     def circle_geometry(command):
@@ -285,6 +316,191 @@ class ShapeCmd(Application):
                 width=2,
             )
 
+    @staticmethod
+    def arc_direction(command, span):
+        if len(command) >= 5:
+            direction = str(command[4]).upper()
+            if direction in ("CW", "CCW"):
+                return direction
+        return "CW" if span < 0 else "CCW"
+
+    def path_geometry(self, commands, closed=False):
+        try:
+            current_x = float(commands[0][1])
+            current_y = float(commands[0][2])
+        except (IndexError, TypeError, ValueError):
+            return {"points": [], "handles": []}
+
+        start_point = (current_x, current_y)
+        points = [start_point]
+        handles = [
+            {
+                "kind": "path_start",
+                "command": commands[0],
+                "point": start_point,
+            }
+        ]
+        heading = 0.0
+
+        for command in list(commands)[1:]:
+            if not command:
+                continue
+
+            command_name = command[0]
+            try:
+                if command_name == "To" and len(command) >= 3:
+                    next_x = float(command[1])
+                    next_y = float(command[2])
+                    delta_x = next_x - current_x
+                    delta_y = next_y - current_y
+                    if delta_x or delta_y:
+                        heading = math.atan2(delta_y, delta_x)
+                    current_x, current_y = next_x, next_y
+                    points.append((current_x, current_y))
+                    handles.append(
+                        {
+                            "kind": "to",
+                            "command": command,
+                            "point": (current_x, current_y),
+                        }
+                    )
+
+                elif command_name == "Turn" and len(command) >= 3:
+                    origin = (current_x, current_y)
+                    heading_before = heading
+                    heading += math.radians(float(command[1]))
+                    distance = float(command[2])
+                    current_x += math.cos(heading) * distance
+                    current_y += math.sin(heading) * distance
+                    points.append((current_x, current_y))
+                    handles.append(
+                        {
+                            "kind": "turn",
+                            "command": command,
+                            "point": (current_x, current_y),
+                            "origin": origin,
+                            "heading_before": heading_before,
+                        }
+                    )
+
+                elif command_name in ("ArcDeg", "ArcRad") and len(command) >= 4:
+                    arc_start = (current_x, current_y)
+                    angle = float(command[1])
+                    radius = abs(float(command[2]))
+                    span = float(command[3])
+                    direction = self.arc_direction(command, span)
+                    if command_name == "ArcDeg":
+                        angle = math.radians(angle)
+                        span = math.radians(span)
+                    span = abs(span) * (-1 if direction == "CW" else 1)
+
+                    center_x = current_x - math.cos(angle) * radius
+                    center_y = current_y - math.sin(angle) * radius
+                    segment_count = (
+                        min(
+                            720,
+                            max(
+                                1,
+                                math.ceil(
+                                    abs(math.degrees(span))
+                                    / self.ARC_SEGMENT_DEGREES
+                                ),
+                            ),
+                        )
+                        if radius and span
+                        else 0
+                    )
+                    for segment_index in range(1, segment_count + 1):
+                        segment_angle = angle + span * segment_index / segment_count
+                        current_x = center_x + math.cos(segment_angle) * radius
+                        current_y = center_y + math.sin(segment_angle) * radius
+                        points.append((current_x, current_y))
+
+                    if span:
+                        heading = angle + span + (
+                            math.pi / 2 if span > 0 else -math.pi / 2
+                        )
+                    handles.extend(
+                        [
+                            {
+                                "kind": "arc_center",
+                                "command": command,
+                                "point": (center_x, center_y),
+                                "start": arc_start,
+                            },
+                            {
+                                "kind": "arc_end",
+                                "command": command,
+                                "point": (current_x, current_y),
+                                "center": (center_x, center_y),
+                                "start_angle": angle,
+                            },
+                        ]
+                    )
+            except (TypeError, ValueError):
+                continue
+
+        if closed and points[-1] != start_point:
+            points.append(start_point)
+        return {"points": points, "handles": handles}
+
+    def path_points(self, commands, closed=False):
+        return self.path_geometry(commands, closed=closed)["points"]
+
+    def draw_path(self, canvas, commands, closed=False):
+        geometry = self.path_geometry(commands, closed=closed)
+        points = geometry["points"]
+        canvas_points = [self.world_to_canvas(x, y) for x, y in points]
+        focused = commands is self.focused_path_commands
+        color = 0xF59E0B if focused else 0x0F766E
+        if len(canvas_points) == 1:
+            canvas.drawEllipse(
+                *canvas_points[0],
+                3,
+                3,
+                fill=color,
+            )
+        elif len(canvas_points) > 1:
+            canvas.drawPolyline(canvas_points, color=color, width=2)
+
+        if not focused:
+            return
+
+        for handle in geometry["handles"]:
+            point_x, point_y = self.world_to_canvas(*handle["point"])
+            if handle["kind"] == "arc_center":
+                start_x, start_y = self.world_to_canvas(*handle["start"])
+                canvas.drawLine(
+                    start_x,
+                    start_y,
+                    point_x,
+                    point_y,
+                    color=0xFBBF24,
+                )
+            elif handle["kind"] == "arc_end":
+                center_x, center_y = self.world_to_canvas(*handle["center"])
+                canvas.drawLine(
+                    center_x,
+                    center_y,
+                    point_x,
+                    point_y,
+                    color=0xFBBF24,
+                )
+
+            canvas.drawEllipse(
+                point_x,
+                point_y,
+                self.HANDLE_RADIUS,
+                self.HANDLE_RADIUS,
+                fill=(
+                    0xF59E0B
+                    if handle["kind"] in ("path_start", "arc_center")
+                    else 0xFFFFFF
+                ),
+                stroke=0xF59E0B,
+                width=2,
+            )
+
     def circle_commands(self):
         for shape in self.state.shapes:
             commands = shape["commands"]
@@ -334,6 +550,147 @@ class ShapeCmd(Application):
                 return command
         return None
 
+    def path_command_lists(self):
+        for shape in self.state.shapes:
+            commands = shape["commands"]
+            if commands and commands[0][0] in ("Path", "ClosedPath"):
+                yield commands
+
+    @staticmethod
+    def point_segment_distance(point, segment_start, segment_end):
+        point_x, point_y = point
+        start_x, start_y = segment_start
+        end_x, end_y = segment_end
+        delta_x = end_x - start_x
+        delta_y = end_y - start_y
+        length_squared = delta_x * delta_x + delta_y * delta_y
+        if length_squared == 0:
+            return math.hypot(point_x - start_x, point_y - start_y)
+
+        fraction = max(
+            0.0,
+            min(
+                1.0,
+                ((point_x - start_x) * delta_x + (point_y - start_y) * delta_y)
+                / length_squared,
+            ),
+        )
+        nearest_x = start_x + fraction * delta_x
+        nearest_y = start_y + fraction * delta_y
+        return math.hypot(point_x - nearest_x, point_y - nearest_y)
+
+    def path_at(self, canvas_x, canvas_y):
+        for commands in reversed(list(self.path_command_lists())):
+            closed = commands[0][0] == "ClosedPath"
+            points = [
+                self.world_to_canvas(*point)
+                for point in self.path_points(commands, closed=closed)
+            ]
+            if len(points) == 1:
+                if (
+                    math.hypot(canvas_x - points[0][0], canvas_y - points[0][1])
+                    <= self.HANDLE_HIT_RADIUS
+                ):
+                    return commands
+                continue
+
+            for start, end in zip(points, points[1:]):
+                if (
+                    self.point_segment_distance((canvas_x, canvas_y), start, end)
+                    <= self.SHAPE_HIT_MARGIN
+                ):
+                    return commands
+        return None
+
+    def focused_path_handle_at(self, canvas_x, canvas_y):
+        if self.focused_path_commands is None:
+            return None
+
+        closed = self.focused_path_commands[0][0] == "ClosedPath"
+        geometry = self.path_geometry(self.focused_path_commands, closed=closed)
+        for handle in reversed(geometry["handles"]):
+            handle_x, handle_y = self.world_to_canvas(*handle["point"])
+            if (
+                math.hypot(canvas_x - handle_x, canvas_y - handle_y)
+                <= self.HANDLE_HIT_RADIUS
+            ):
+                return handle
+        return None
+
+    def current_path_handle(self):
+        if self.focused_path_commands is None or self.drag_target is None:
+            return None
+
+        target_command, target_kind = self.drag_target
+        closed = self.focused_path_commands[0][0] == "ClosedPath"
+        geometry = self.path_geometry(self.focused_path_commands, closed=closed)
+        for handle in geometry["handles"]:
+            if handle["command"] is target_command and handle["kind"] == target_kind:
+                return handle
+        return None
+
+    @staticmethod
+    def signed_angle_delta(angle):
+        return (angle + math.pi) % (2 * math.pi) - math.pi
+
+    def drag_path_handle(self, world_x, world_y):
+        handle = self.current_path_handle()
+        if handle is None:
+            return
+
+        command = handle["command"]
+        target_x = world_x + self.drag_offset[0]
+        target_y = world_y + self.drag_offset[1]
+        kind = handle["kind"]
+
+        if kind in ("path_start", "to"):
+            with command:
+                command[1] = target_x
+                command[2] = target_y
+        elif kind == "turn":
+            origin_x, origin_y = handle["origin"]
+            delta_x = target_x - origin_x
+            delta_y = target_y - origin_y
+            distance = math.hypot(delta_x, delta_y)
+            new_heading = (
+                math.atan2(delta_y, delta_x)
+                if distance
+                else handle["heading_before"]
+            )
+            turn_angle = self.signed_angle_delta(
+                new_heading - handle["heading_before"]
+            )
+            with command:
+                command[1] = math.degrees(turn_angle)
+                command[2] = distance
+        elif kind == "arc_center":
+            start_x, start_y = handle["start"]
+            delta_x = start_x - target_x
+            delta_y = start_y - target_y
+            angle = math.atan2(delta_y, delta_x)
+            radius = math.hypot(delta_x, delta_y)
+            with command:
+                command[1] = (
+                    math.degrees(angle) if command[0] == "ArcDeg" else angle
+                )
+                command[2] = radius
+        elif kind == "arc_end":
+            center_x, center_y = handle["center"]
+            end_angle = math.atan2(target_y - center_y, target_x - center_x)
+            span = self.signed_angle_delta(end_angle - handle["start_angle"])
+            old_span = float(command[3])
+            direction = self.arc_direction(command, old_span)
+            if direction == "CCW" and span < 0:
+                span += 2 * math.pi
+            elif direction == "CW" and span > 0:
+                span -= 2 * math.pi
+            with command:
+                command[3] = (
+                    math.degrees(abs(span)) if command[0] == "ArcDeg" else abs(span)
+                )
+                if len(command) < 5:
+                    command.append(direction)
+
     def paint_canvas(self, canvas):
         self.update_canvas_size(canvas.width, canvas.height)
         origin_x, origin_y = self.view_origin
@@ -373,6 +730,7 @@ class ShapeCmd(Application):
     def canvas_mouseleave(self, event):
         self.cursor_position = None
         self.drag_action = None
+        self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
         self.redraw()
@@ -398,23 +756,50 @@ class ShapeCmd(Application):
                     self.drag_offset = radius - (world_x - center_x)
                 return
 
+            path_handle = self.focused_path_handle_at(event.x, event.y)
+            if path_handle is not None:
+                world_x, world_y = self.canvas_to_world(event.x, event.y)
+                handle_x, handle_y = path_handle["point"]
+                self.drag_action = "path_handle"
+                self.drag_target = (
+                    path_handle["command"],
+                    path_handle["kind"],
+                )
+                self.drag_offset = (handle_x - world_x, handle_y - world_y)
+                return
+
+            path_commands = self.path_at(event.x, event.y)
+            if path_commands is not None:
+                self.focused_path_commands = path_commands
+                self.focused_command = None
+                self.drag_action = None
+                self.drag_target = None
+                self.drag_position = None
+                self.redraw()
+                return
+
             command = self.circle_at(event.x, event.y)
             if command is not None:
                 self.focused_command = command
+                self.focused_path_commands = None
                 self.drag_action = None
+                self.drag_target = None
                 self.drag_position = None
                 self.redraw()
                 return
 
             self.focused_command = None
+            self.focused_path_commands = None
 
         self.drag_action = "pan"
+        self.drag_target = None
         self.drag_position = (event.x, event.y)
         self.drag_offset = None
         self.redraw()
 
     def canvas_mouseup(self, event):
         self.drag_action = None
+        self.drag_target = None
         self.drag_position = None
         self.drag_offset = None
         self.cursor_position = (event.x, event.y)
@@ -442,6 +827,9 @@ class ShapeCmd(Application):
                     0.0,
                     world_x - center_x + self.drag_offset,
                 )
+        elif self.drag_action == "path_handle":
+            world_x, world_y = self.canvas_to_world(event.x, event.y)
+            self.drag_path_handle(world_x, world_y)
 
         self.cursor_position = (event.x, event.y)
         self.redraw()
@@ -460,13 +848,83 @@ class ShapeCmd(Application):
         self.cursor_position = (event.x, event.y)
         self.redraw()
 
+    def drawable_bounds(self):
+        bounds = []
+        for shape in self.state.shapes:
+            commands = shape["commands"]
+            if not commands:
+                continue
+
+            command = commands[0]
+            if command[0] == "Circle":
+                geometry = self.circle_geometry(command)
+                if geometry is not None:
+                    center_x, center_y, radius = geometry
+                    bounds.append(
+                        (
+                            center_x - radius,
+                            center_y - radius,
+                            center_x + radius,
+                            center_y + radius,
+                        )
+                    )
+            elif command[0] in ("Path", "ClosedPath"):
+                points = self.path_points(
+                    commands,
+                    closed=command[0] == "ClosedPath",
+                )
+                if points:
+                    x_values = [point[0] for point in points]
+                    y_values = [point[1] for point in points]
+                    bounds.append(
+                        (
+                            min(x_values),
+                            min(y_values),
+                            max(x_values),
+                            max(y_values),
+                        )
+                    )
+
+        if not bounds:
+            return None
+        return (
+            min(bound[0] for bound in bounds),
+            min(bound[1] for bound in bounds),
+            max(bound[2] for bound in bounds),
+            max(bound[3] for bound in bounds),
+        )
+
     def fit_canvas(self, event):
         if self.canvas_size is None:
             return
 
         width, height = self.canvas_size
-        self.view_origin = [width / 2, height / 2]
-        self.zoom = 1.0
+        bounds = self.drawable_bounds()
+        if bounds is None:
+            self.view_origin = [width / 2, height / 2]
+            self.zoom = 1.0
+            self.redraw()
+            return
+
+        min_x, min_y, max_x, max_y = bounds
+        content_width = max_x - min_x
+        content_height = max_y - min_y
+        available_width = max(1, width - 2 * self.FIT_PADDING)
+        available_height = max(1, height - 2 * self.FIT_PADDING)
+        scale_candidates = []
+        if content_width:
+            scale_candidates.append(available_width / content_width)
+        if content_height:
+            scale_candidates.append(available_height / content_height)
+        self.zoom = min(scale_candidates) if scale_candidates else 1.0
+        self.zoom = min(self.MAX_ZOOM, max(self.MIN_ZOOM, self.zoom))
+
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        self.view_origin = [
+            width / 2 - center_x * self.zoom,
+            height / 2 + center_y * self.zoom,
+        ]
         self.redraw()
 
     def add_next(self, event, shape):
@@ -475,6 +933,12 @@ class ShapeCmd(Application):
     def command_changed(self, event, command):
         if command is self.focused_command and command[0] != "Circle":
             self.focused_command = None
+        if (
+            self.focused_path_commands is not None
+            and command is self.focused_path_commands[0]
+            and command[0] not in ("Path", "ClosedPath")
+        ):
+            self.focused_path_commands = None
 
         parameters = self.COMMAND_PARAMETERS.get(command[0])
         if parameters is None:

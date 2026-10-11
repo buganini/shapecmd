@@ -1,7 +1,7 @@
 # Shape或Path起點
 - Point: x, y
 - Circle:  center_x, center_y, radius
-- Arc: center_x, center_y, start_angle, span_deg
+- Arc: center_x, center_y, start_angle, span_deg, direction (CW/CCW)
 - Rect: x, y, x_offset, y_offset
 - CenterRect: center_x, center_y, width, height
 - RegularPolygon: center_x, center_y, radius, sides, rotate_deg
@@ -10,8 +10,8 @@
 - ClosePath: x, y
 
 # Path Next
-- ArcDeg: angle, span_deg
-- ArcRad: angle, span_radian
+- ArcDeg: angle, radius, span_deg, direction (CW/CCW)
+- ArcRad: angle, radius, span_radian, direction (CW/CCW)
 - Turn: angle, distance
 - To: x, y
 - BezierTo: x, y
