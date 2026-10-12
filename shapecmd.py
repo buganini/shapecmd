@@ -86,6 +86,8 @@ class ShapeCmd(Application):
     PIXELS_PER_ZOOM_STEP = 120.0
     HANDLE_RADIUS = 5
     HANDLE_HIT_RADIUS = 9
+    PATH_MOVE_HANDLE_RADIUS = 12
+    PATH_MOVE_HANDLE_HIT_MARGIN = 3
     SHAPE_HIT_MARGIN = 6
     ARC_SEGMENT_DEGREES = 5
     BEZIER_SEGMENTS = 32
@@ -146,6 +148,7 @@ class ShapeCmd(Application):
         "rect_rotation": "Rotation",
         "polygon_vertex": "Radius and rotation",
         "path_start": "Path start",
+        "path_move": "Move shape",
         "to": "Endpoint",
         "bezier_to": "Bezier endpoint",
         "bezier_to_shape": "Bezier target shape position",
@@ -2057,6 +2060,16 @@ class ShapeCmd(Application):
                     color=0xFBBF24,
                 )
 
+            if handle["kind"] == "path_start":
+                canvas.drawEllipse(
+                    point_x,
+                    point_y,
+                    self.PATH_MOVE_HANDLE_RADIUS,
+                    self.PATH_MOVE_HANDLE_RADIUS,
+                    stroke=0xF59E0B,
+                    width=2,
+                )
+
             if handle["kind"] == "segment_midpoint":
                 canvas.drawRect(
                     point_x - self.HANDLE_RADIUS,
@@ -2344,13 +2357,31 @@ class ShapeCmd(Application):
 
         closed = self.focused_path_commands[0][0] == "ClosedPath"
         geometry = self.path_geometry(self.focused_path_commands, closed=closed)
+        path_start_handle = None
         for handle in reversed(geometry["handles"]):
+            if handle["kind"] == "path_start":
+                path_start_handle = handle
+                continue
             handle_x, handle_y = self.world_to_canvas(*handle["point"])
             if (
                 math.hypot(canvas_x - handle_x, canvas_y - handle_y)
                 <= self.HANDLE_HIT_RADIUS
             ):
                 return handle
+
+        if path_start_handle is not None:
+            handle_x, handle_y = self.world_to_canvas(*path_start_handle["point"])
+            distance = math.hypot(canvas_x - handle_x, canvas_y - handle_y)
+            if distance <= self.HANDLE_HIT_RADIUS:
+                return path_start_handle
+            if distance <= (
+                self.PATH_MOVE_HANDLE_RADIUS
+                + self.PATH_MOVE_HANDLE_HIT_MARGIN
+            ):
+                return {
+                    **path_start_handle,
+                    "kind": "path_move",
+                }
         return None
 
     def current_path_handle(self):
@@ -2360,6 +2391,21 @@ class ShapeCmd(Application):
         target_command, target_kind = self.drag_target
         closed = self.focused_path_commands[0][0] == "ClosedPath"
         geometry = self.path_geometry(self.focused_path_commands, closed=closed)
+        if target_kind == "path_move":
+            path_start_handle = next(
+                (
+                    handle
+                    for handle in geometry["handles"]
+                    if handle["kind"] == "path_start"
+                ),
+                None,
+            )
+            if path_start_handle is None:
+                return None
+            return {
+                **path_start_handle,
+                "kind": "path_move",
+            }
         for handle in geometry["handles"]:
             if handle["command"] is target_command and handle["kind"] == target_kind:
                 return handle
@@ -2494,7 +2540,18 @@ class ShapeCmd(Application):
         target_y = world_y + self.drag_offset[1]
         kind = handle["kind"]
 
-        if kind == "segment_midpoint":
+        if kind == "path_move":
+            if self.drag_position is None:
+                return
+            delta_x = world_x - self.drag_position[0]
+            delta_y = world_y - self.drag_position[1]
+            self.translate_shape(
+                {"commands": self.focused_path_commands},
+                delta_x,
+                delta_y,
+            )
+            self.drag_position = (world_x, world_y)
+        elif kind == "segment_midpoint":
             self.drag_path_segment_midpoint(handle, target_x, target_y)
         elif kind in self.SHAPE_TARGET_HANDLE_KINDS:
             target_shape = self.shape_named(command[1])
