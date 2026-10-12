@@ -87,6 +87,7 @@ class ShapeCmd(Application):
     HANDLE_RADIUS = 5
     HANDLE_HIT_RADIUS = 9
     PATH_MOVE_HANDLE_RADIUS = 12
+    PATH_MOVE_RELATED_HANDLE_RADIUS = 19
     PATH_MOVE_HANDLE_HIT_MARGIN = 3
     SHAPE_HIT_MARGIN = 6
     ARC_SEGMENT_DEGREES = 5
@@ -124,6 +125,14 @@ class ShapeCmd(Application):
         "arc_to_shape",
         "arc_to_shape_edge",
     }
+    SHAPE_REFERENCE_COMMANDS = {
+        "ToShape",
+        "ToShapeEdge",
+        "BezierToShape",
+        "BezierToShapeEdge",
+        "ArcToShape",
+        "ArcToShapeEdge",
+    }
     ARC_TO_COMMANDS = {
         "ArcTo",
         "ArcToShape",
@@ -149,6 +158,7 @@ class ShapeCmd(Application):
         "polygon_vertex": "Radius and rotation",
         "path_start": "Path start",
         "path_move": "Move shape",
+        "path_move_related": "Move shape and related shapes",
         "to": "Endpoint",
         "bezier_to": "Bezier endpoint",
         "bezier_to_shape": "Bezier target shape position",
@@ -990,6 +1000,61 @@ class ShapeCmd(Application):
             return float(command[1]), float(command[2])
         except (IndexError, TypeError, ValueError):
             return None
+
+    def focused_path_shape(self):
+        if self.focused_path_commands is None:
+            return None
+        return next(
+            (
+                shape
+                for shape in self.state.shapes
+                if shape.get("commands") is self.focused_path_commands
+            ),
+            None,
+        )
+
+    def related_shapes(self, source_shape):
+        shapes = list(self.state.shapes)
+        shape_indices = {
+            id(shape): index for index, shape in enumerate(shapes)
+        }
+        source_index = shape_indices.get(id(source_shape))
+        if source_index is None:
+            return [source_shape]
+
+        adjacency = [set() for _ in shapes]
+        for shape_index, shape in enumerate(shapes):
+            for command in shape.get("commands", []):
+                if (
+                    not command
+                    or command[0] not in self.SHAPE_REFERENCE_COMMANDS
+                    or len(command) < 2
+                ):
+                    continue
+                target_shape = self.shape_named(command[1])
+                if target_shape is None:
+                    continue
+                target_index = shape_indices.get(id(target_shape))
+                if target_index is None:
+                    continue
+                adjacency[shape_index].add(target_index)
+                adjacency[target_index].add(shape_index)
+
+        related_indices = {source_index}
+        pending = [source_index]
+        while pending:
+            shape_index = pending.pop()
+            for related_index in adjacency[shape_index]:
+                if related_index in related_indices:
+                    continue
+                related_indices.add(related_index)
+                pending.append(related_index)
+
+        return [
+            shape
+            for shape_index, shape in enumerate(shapes)
+            if shape_index in related_indices
+        ]
 
     @staticmethod
     def translate_shape(shape, delta_x, delta_y):
@@ -2064,6 +2129,14 @@ class ShapeCmd(Application):
                 canvas.drawEllipse(
                     point_x,
                     point_y,
+                    self.PATH_MOVE_RELATED_HANDLE_RADIUS,
+                    self.PATH_MOVE_RELATED_HANDLE_RADIUS,
+                    stroke=0xF59E0B,
+                    width=2,
+                )
+                canvas.drawEllipse(
+                    point_x,
+                    point_y,
                     self.PATH_MOVE_HANDLE_RADIUS,
                     self.PATH_MOVE_HANDLE_RADIUS,
                     stroke=0xF59E0B,
@@ -2382,6 +2455,14 @@ class ShapeCmd(Application):
                     **path_start_handle,
                     "kind": "path_move",
                 }
+            if distance <= (
+                self.PATH_MOVE_RELATED_HANDLE_RADIUS
+                + self.PATH_MOVE_HANDLE_HIT_MARGIN
+            ):
+                return {
+                    **path_start_handle,
+                    "kind": "path_move_related",
+                }
         return None
 
     def current_path_handle(self):
@@ -2391,7 +2472,7 @@ class ShapeCmd(Application):
         target_command, target_kind = self.drag_target
         closed = self.focused_path_commands[0][0] == "ClosedPath"
         geometry = self.path_geometry(self.focused_path_commands, closed=closed)
-        if target_kind == "path_move":
+        if target_kind in ("path_move", "path_move_related"):
             path_start_handle = next(
                 (
                     handle
@@ -2404,7 +2485,7 @@ class ShapeCmd(Application):
                 return None
             return {
                 **path_start_handle,
-                "kind": "path_move",
+                "kind": target_kind,
             }
         for handle in geometry["handles"]:
             if handle["command"] is target_command and handle["kind"] == target_kind:
@@ -2540,16 +2621,23 @@ class ShapeCmd(Application):
         target_y = world_y + self.drag_offset[1]
         kind = handle["kind"]
 
-        if kind == "path_move":
+        if kind in ("path_move", "path_move_related"):
             if self.drag_position is None:
                 return
             delta_x = world_x - self.drag_position[0]
             delta_y = world_y - self.drag_position[1]
-            self.translate_shape(
-                {"commands": self.focused_path_commands},
-                delta_x,
-                delta_y,
-            )
+            focused_shape = self.focused_path_shape()
+            if focused_shape is None:
+                self.translate_shape(
+                    {"commands": self.focused_path_commands},
+                    delta_x,
+                    delta_y,
+                )
+            elif kind == "path_move_related":
+                for shape in self.related_shapes(focused_shape):
+                    self.translate_shape(shape, delta_x, delta_y)
+            else:
+                self.translate_shape(focused_shape, delta_x, delta_y)
             self.drag_position = (world_x, world_y)
         elif kind == "segment_midpoint":
             self.drag_path_segment_midpoint(handle, target_x, target_y)
