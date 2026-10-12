@@ -1,0 +1,2 @@
+Unreleased:
+    * Canvas: support pixel-only wheel zoom with application-level sensitivity while preserving angular zoom, cursor anchoring, and zoom limits

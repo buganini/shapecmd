@@ -82,6 +82,8 @@ class ShapeCmd(Application):
     MIN_ZOOM = 0.05
     MAX_ZOOM = 100.0
     ZOOM_STEP = 1.2
+    # Application sensitivity for pixel scroll events, not a wheel-unit conversion.
+    PIXELS_PER_ZOOM_STEP = 120.0
     HANDLE_RADIUS = 5
     HANDLE_HIT_RADIUS = 9
     SHAPE_HIT_MARGIN = 6
@@ -2927,12 +2929,17 @@ class ShapeCmd(Application):
         self.redraw()
 
     def canvas_wheel(self, event):
-        if not event.v_delta or self.view_origin is None:
+        if self.view_origin is None:
+            return
+
+        steps = (event.v_delta / 120 if event.v_delta
+                 else event.y_delta / self.PIXELS_PER_ZOOM_STEP)
+        if not steps:
             return
 
         self.hide_handle_tooltip()
         world_x, world_y = self.canvas_to_world(event.x, event.y)
-        zoom_factor = self.ZOOM_STEP ** (event.v_delta / 120)
+        zoom_factor = self.ZOOM_STEP ** steps
         new_zoom = min(self.MAX_ZOOM, max(self.MIN_ZOOM, self.zoom * zoom_factor))
 
         self.view_origin[0] = event.x - world_x * new_zoom

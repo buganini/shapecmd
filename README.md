@@ -144,7 +144,11 @@ rendered line segments.
 
 ## Controls
 
-- Mouse wheel: zoom around the cursor.
+- Mouse wheel: zoom around the cursor. Angular wheel events use 120 units per
+  step; pixel-only events (including Flet) use the application's
+  `PIXELS_PER_ZOOM_STEP` sensitivity, currently 120 logical pixels per step.
+  Each step changes zoom by a factor of 1.2. If both deltas are supplied, the
+  angular delta takes precedence; pixel and angular units remain separate.
 - Drag an empty area with the left mouse button, or drag with the middle mouse
   button: pan the canvas.
 - Click a shape: focus it and enter edit mode.
