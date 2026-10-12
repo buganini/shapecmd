@@ -17,7 +17,9 @@ if installed_pui_version < MINIMUM_PUI_VERSION:
     )
 
 from PUI.PySide6 import *
-from PySide6 import QtCore, QtGui, QtWidgets
+
+if PUI_BACKEND == "PySide6":
+    from PySide6 import QtCore, QtGui, QtWidgets
 
 
 class ArgumentBinding:
@@ -54,6 +56,9 @@ class ShapeCommandTable(Table):
 
     def update(self, prev):
         super().update(prev)
+        if PUI_BACKEND != "PySide6":
+            return
+
         self.ui.setAlternatingRowColors(True)
         self.ui.setWordWrap(False)
         self.ui.setVerticalScrollBarPolicy(
@@ -2667,13 +2672,17 @@ class ShapeCmd(Application):
             return
 
         text, cursor_x, cursor_y = self.handle_tooltip
-        font = canvas.qpainter.font()
-        font.setPointSize(12)
-        metrics = QtGui.QFontMetrics(font)
         padding_x = 5
         padding_y = 3
-        width = metrics.horizontalAdvance(text) + padding_x * 2
-        height = metrics.height() + padding_y * 2
+        if PUI_BACKEND == "PySide6":
+            font = canvas.qpainter.font()
+            font.setPointSize(12)
+            metrics = QtGui.QFontMetrics(font)
+            width = metrics.horizontalAdvance(text) + padding_x * 2
+            height = metrics.height() + padding_y * 2
+        else:
+            width = len(text) * 8 + padding_x * 2
+            height = 18 + padding_y * 2
         left = cursor_x + 12
         top = cursor_y + 16
 
