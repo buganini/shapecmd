@@ -1,8 +1,9 @@
 # ShapeCmd
 
-ShapeCmd is an interactive 2D shape-command editor built with PUI and PySide6.
-The canvas on the left provides previews and drag editing, while the panel on
-the right edits command parameters. Shape data is loaded from and saved to JSON.
+ShapeCmd is an interactive 2D shape-command editor built with PUI. It supports
+the PySide6, wx, and Flet backends. The canvas on the left provides previews
+and drag editing, while the panel on the right edits command parameters. Shape
+data is loaded from and saved to JSON.
 
 ## Installation and Usage
 
@@ -10,11 +11,27 @@ the right edits command parameters. Shape data is loaded from and saved to JSON.
 python -m venv env
 source env/bin/activate
 pip install -r requirements.txt
-python shapecmd.py input.json
+make
 ```
 
-The application loads the JSON file specified by `argv[1]`. Clicking `Save`
-opens a PUI `SaveFile` dialog with `argv[1]` as the default output path.
+The default target uses PySide6. Select another backend with:
+
+```sh
+make pyside6
+make wx
+make flet
+```
+
+Set `INPUT` to open a different file, for example
+`make wx INPUT=another.json`. The equivalent direct invocation is
+`python shapecmd.py INPUT.json [pyside6|wx|flet]`; the backend defaults to
+PySide6 when omitted, so `argv[1]` remains the input JSON path.
+
+Install the selected PUI backend's optional dependencies before launching it,
+for example `pip install "QPUIQ[wx]>=1.1"` or
+`pip install "QPUIQ[flet]>=1.1"`. Clicking `Save` opens a PUI `SaveFile`
+dialog with `argv[1]` as the default output path where the backend provides
+one.
 
 ## JSON Format
 

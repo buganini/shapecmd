@@ -6,7 +6,12 @@ from xml.sax.saxutils import quoteattr
 
 import PUI
 
-MINIMUM_PUI_VERSION = (0, 51)
+MINIMUM_PUI_VERSION = (1, 1)
+BACKEND_ALIASES = {
+    "pyside6": "PySide6",
+    "wx": "wx",
+    "flet": "flet",
+}
 installed_pui_version = tuple(int(part) for part in PUI.__version__.split("."))
 if installed_pui_version < MINIMUM_PUI_VERSION:
     required_version = ".".join(str(part) for part in MINIMUM_PUI_VERSION)
@@ -16,7 +21,28 @@ if installed_pui_version < MINIMUM_PUI_VERSION:
         f'Run: pip install -U "QPUIQ>={required_version}"'
     )
 
-from PUI.PySide6 import *
+requested_backend = sys.argv[2].lower() if len(sys.argv) >= 3 else "pyside6"
+backend = BACKEND_ALIASES.get(requested_backend)
+if backend is None:
+    supported_backends = "|".join(BACKEND_ALIASES)
+    raise SystemExit(
+        f"Unsupported PUI backend: {requested_backend}. "
+        f"Expected one of: {supported_backends}"
+    )
+
+try:
+    if backend == "PySide6":
+        from PUI.PySide6 import *
+    elif backend == "wx":
+        from PUI.wx import *
+    elif backend == "flet":
+        from PUI.flet import *
+except ModuleNotFoundError as error:
+    extra = requested_backend
+    raise SystemExit(
+        f"PUI {backend} backend is unavailable. "
+        f'Install it with: pip install "QPUIQ[{extra}]>=1.1"'
+    ) from error
 
 if PUI_BACKEND == "PySide6":
     from PySide6 import QtCore, QtGui, QtWidgets
@@ -3586,7 +3612,10 @@ class ShapeCmd(Application):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        raise SystemExit(f"Usage: {Path(sys.argv[0]).name} INPUT.json")
+        raise SystemExit(
+            f"Usage: {Path(sys.argv[0]).name} "
+            "INPUT.json [pyside6|wx|flet]"
+        )
 
     app = ShapeCmd(sys.argv[1])
     app.run()
