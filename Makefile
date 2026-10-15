@@ -3,7 +3,7 @@
 PYTHON ?= python3
 INPUT ?= input.json
 WEB_PYTHON ?= env/bin/python
-WEB_BIND ?= localhost:8866
+WEB_BIND ?= localhost:8867
 WEB_BASE_URL ?= /shapecmd
 WEB_ALLOW_HOSTS ?= *
 WEB_TRUSTED_PROXIES ?= 127.0.0.0/8 ::1/128 unix
