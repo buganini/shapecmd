@@ -564,14 +564,12 @@ class ShapeCmd(Application):
                                                     value = argument.value
                                                     if arg_name == "direction":
                                                         choices = ("CCW", "CW")
-                                                        display_value = value
                                                     else:
                                                         choices = None
-                                                        display_value = value
                                                     (
                                                         TableNode(
                                                             value,
-                                                            display=f"{self.parameter_label(arg_name)}: {display_value}",
+                                                            prefix=f"{self.parameter_label(arg_name)}: ",
                                                             choices=choices,
                                                         ).set(
                                                             self.table_argument_changed,
