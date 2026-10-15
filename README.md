@@ -1,7 +1,7 @@
 # ShapeCmd
 
 ShapeCmd is an interactive 2D shape-command editor built with PUI. It supports
-the PySide6, wx, and Flet backends. The canvas on the left provides previews
+the PySide6, wx, Flet, and experimental Web backends. The canvas on the left provides previews
 and drag editing, while the panel on the right edits command parameters. Shape
 data is loaded from and saved to JSON.
 
@@ -20,12 +20,19 @@ The default target uses PySide6. Select another backend with:
 make pyside6
 make wx
 make flet
+make web
 ```
 
 Set `INPUT` to open a different file, for example
 `make wx INPUT=another.json`. The equivalent direct invocation is
 `python shapecmd.py INPUT.json [pyside6|wx|flet]`; the backend defaults to
 PySide6 when omitted, so `argv[1]` remains the input JSON path.
+
+The Web backend follows PUI's server launcher and currently requires Linux.
+Install it with `pip install "QPUIQ[web]>=1.1"`, then open
+`http://localhost:8866/shapecmd/` after running `make web`. Its server options
+can be changed with `WEB_PYTHON`, `WEB_HOST`, `WEB_PORT`, `WEB_BASE_URL`,
+`WEB_ALLOW_HOSTS`, and `WEB_TRUSTED_PROXIES`.
 
 Install the selected PUI backend's optional dependencies before launching it,
 for example `pip install "QPUIQ[wx]>=1.1"` or

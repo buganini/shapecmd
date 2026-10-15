@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
@@ -11,6 +12,7 @@ BACKEND_ALIASES = {
     "pyside6": "PySide6",
     "wx": "wx",
     "flet": "flet",
+    "web": "web",
 }
 installed_pui_version = tuple(int(part) for part in PUI.__version__.split("."))
 if installed_pui_version < MINIMUM_PUI_VERSION:
@@ -21,7 +23,10 @@ if installed_pui_version < MINIMUM_PUI_VERSION:
         f'Run: pip install -U "QPUIQ>={required_version}"'
     )
 
-requested_backend = sys.argv[2].lower() if len(sys.argv) >= 3 else "pyside6"
+requested_backend = os.environ.get("PUI_BACKEND")
+if requested_backend is None:
+    requested_backend = sys.argv[2] if len(sys.argv) >= 3 else "pyside6"
+requested_backend = requested_backend.lower()
 backend = BACKEND_ALIASES.get(requested_backend)
 if backend is None:
     supported_backends = "|".join(BACKEND_ALIASES)
@@ -37,6 +42,8 @@ try:
         from PUI.wx import *
     elif backend == "flet":
         from PUI.flet import *
+    elif backend == "web":
+        from PUI.web import *
 except ModuleNotFoundError as error:
     extra = requested_backend
     raise SystemExit(
@@ -434,9 +441,10 @@ class ShapeCmd(Application):
             command[radius_index] = max(round(radius, 2), minimum_radius)
 
     def content(self):
-        with Window(title="ShapeCmd", maximize=True).keypress(
-            self.window_keypress
-        ):
+        window = Window(title="ShapeCmd", maximize=True)
+        if PUI_BACKEND != "web":
+            window.keypress(self.window_keypress)
+        with window:
             with HBox():
                 with VBox().layout(weight=1):
                     with HBox():
@@ -3608,6 +3616,13 @@ class ShapeCmd(Application):
         if output_path is None:
             return
         Path(output_path).write_text(self.svg_document(), encoding="utf-8")
+
+
+class WebShapeCmd(ShapeCmd):
+    """Zero-argument factory used by PUI's per-session Web workers."""
+
+    def __init__(self):
+        super().__init__(os.environ.get("SHAPECMD_INPUT", "input.json"))
 
 
 if __name__ == "__main__":
