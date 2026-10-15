@@ -28,10 +28,10 @@ Set `INPUT` to open a different file, for example
 `python shapecmd.py INPUT.json [pyside6|wx|flet]`; the backend defaults to
 PySide6 when omitted, so `argv[1]` remains the input JSON path.
 
-The Web backend follows PUI's server launcher and currently requires Linux.
-Install it with `pip install "QPUIQ[web]>=1.1"`, then open
+The Web backend follows PUI's server launcher. Install it with
+`pip install "QPUIQ[web]>=1.1"`, then open
 `http://localhost:8866/shapecmd/` after running `make web`. Its server options
-can be changed with `WEB_PYTHON`, `WEB_HOST`, `WEB_PORT`, `WEB_BASE_URL`,
+can be changed with `WEB_PYTHON`, `WEB_BIND`, `WEB_BASE_URL`,
 `WEB_ALLOW_HOSTS`, and `WEB_TRUSTED_PROXIES`.
 
 Install the selected PUI backend's optional dependencies before launching it,
